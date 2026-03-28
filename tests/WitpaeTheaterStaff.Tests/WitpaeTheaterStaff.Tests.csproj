@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+
+    <!--
+      x86 ONLY — must match the main project so P/Invoke structs are
+      the same size in both the application and the test runner.
+    -->
+    <PlatformTarget>x86</PlatformTarget>
+    <Platforms>x86</Platforms>
+
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit"                       Version="2.9.3"/>
+    <PackageReference Include="xunit.runner.visualstudio"   Version="3.0.1">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk"      Version="17.13.0"/>
+    <PackageReference Include="coverlet.collector"           Version="6.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WitpaeTheaterStaff\WitpaeTheaterStaff.csproj"/>
+  </ItemGroup>
+
+</Project>
