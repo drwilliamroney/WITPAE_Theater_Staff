@@ -166,18 +166,30 @@ public sealed class PwsDll : IDisposable
         if (!File.Exists(pwsdll7Path))
             throw new DllNotAvailableException($"DLL not found: {pwsdll7Path}");
 
+        IntPtr dllHandle  = IntPtr.Zero;
+        IntPtr dll7Handle = IntPtr.Zero;
+
         try
         {
-            _dllHandle  = NativeLibrary.Load(pwsdllPath);
-            _dll7Handle = NativeLibrary.Load(pwsdll7Path);
+            dllHandle  = NativeLibrary.Load(pwsdllPath);
+            dll7Handle = NativeLibrary.Load(pwsdll7Path);
+
+            IntPtr fnPtr = NativeLibrary.GetExport(dllHandle, "GetRecInfo");
+            _getRecInfo = Marshal.GetDelegateForFunctionPointer<GetRecInfoDelegate>(fnPtr);
+
+            // Only assign fields after all exports are resolved successfully
+            _dllHandle  = dllHandle;
+            _dll7Handle = dll7Handle;
         }
         catch (Exception ex)
         {
+            if (dllHandle != IntPtr.Zero)
+                NativeLibrary.Free(dllHandle);
+            if (dll7Handle != IntPtr.Zero)
+                NativeLibrary.Free(dll7Handle);
+
             throw new DllNotAvailableException($"Failed to load DLLs from {dllDir}: {ex.Message}", ex);
         }
-
-        IntPtr fnPtr = NativeLibrary.GetExport(_dllHandle, "GetRecInfo");
-        _getRecInfo = Marshal.GetDelegateForFunctionPointer<GetRecInfoDelegate>(fnPtr);
     }
 
     private IntPtr CallGetRecInfo(string saveFile, int recType)

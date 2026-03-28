@@ -58,7 +58,16 @@ public static class MapAssembly
             if (tilePaths.Any(p => !File.Exists(p))) return null;
 
             var tiles = tilePaths
-                .Select(p => new BitmapImage(new Uri(p, UriKind.Absolute)))
+                .Select(p =>
+                {
+                    var img = new BitmapImage();
+                    img.BeginInit();
+                    img.UriSource    = new Uri(p, UriKind.Absolute);
+                    img.CacheOption  = BitmapCacheOption.OnLoad;
+                    img.EndInit();
+                    img.Freeze();
+                    return img;
+                })
                 .ToArray();
 
             // Compute per-column widths and per-row heights

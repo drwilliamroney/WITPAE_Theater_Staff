@@ -294,6 +294,9 @@ public sealed class GameDataScraper : IDisposable
         int tfStride = Marshal.SizeOf<PWSTaskGroup>();
         var taskForces = new List<TaskForceRecord>();
 
+        // Build ship-by-id lookup for O(1) flagship resolution
+        var shipsById = ships.ToDictionary(s => s.RecordId);
+
         // Build ship-to-TF lookup
         var shipsByTf = new Dictionary<int, List<(int Id, string Name)>>();
         for (int i = 0; i < ships.Count; i++)
@@ -312,27 +315,22 @@ public sealed class GameDataScraper : IDisposable
             var tf = Marshal.PtrToStructure<PWSTaskGroup>(tfPtr + i * tfStride);
             if (tf.FlagshipId <= 0) continue;
 
-            string flagshipName = ships.FirstOrDefault(s => s.RecordId == tf.FlagshipId)?.Name ?? string.Empty;
-            if (string.IsNullOrEmpty(flagshipName)) continue;
+            if (!shipsById.TryGetValue(tf.FlagshipId, out var flagship)) continue;
+            if (string.IsNullOrEmpty(flagship.Name)) continue;
 
             shipsByTf.TryGetValue(i, out var tfShips);
             if (tfShips == null || tfShips.Count == 0) continue;
-
-            // Derive position from flagship's base
-            var flagship = ships.FirstOrDefault(s => s.RecordId == tf.FlagshipId);
-            int? endX = flagship?.X;
-            int? endY = flagship?.Y;
 
             int missionCode = tf.Mission;
             taskForces.Add(new TaskForceRecord
             {
                 RecordId    = i,
-                FlagshipName = flagshipName,
+                FlagshipName = flagship.Name,
                 MissionCode  = missionCode,
                 MissionName  = MissionNames.GetValueOrDefault(missionCode, ""),
                 HomePortId   = tf.HomePortId > 0 ? tf.HomePortId : null,
-                EndX         = endX,
-                EndY         = endY,
+                EndX         = flagship.X,
+                EndY         = flagship.Y,
                 ShipIds      = tfShips.Select(s => s.Id).ToList().AsReadOnly(),
                 ShipNames    = tfShips.Select(s => s.Name).ToList().AsReadOnly(),
             });

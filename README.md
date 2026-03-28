@@ -53,15 +53,15 @@ This single requirement drove the entire technology selection.
 | Overlay model fit | Limited | Excellent — WPF Canvas + named child elements |
 | Type safety | Partial (type hints) | Full static typing |
 | IDE tooling | Basic | VS 2022 designer, hot reload, IntelliSense |
-| Deployment | Requires 32-bit Python venv | Self-contained `.exe`, no runtime install |
+| Deployment | Requires 32-bit Python venv | Single `.exe`; requires .NET 8 x86 runtime |
 | CI/CD | `pytest` on Linux (cross-platform) | `dotnet test` on `windows-latest` (matches target OS) |
 | Test framework | pytest | xUnit — integrated with VS Test Explorer |
 
 **Decision: C# WPF, compiled as `x86` only, targeting `.NET 8`.**
 
-A single, self-contained `.exe` that loads 32-bit game DLLs via P/Invoke,
-renders the map on a hardware-accelerated WPF Canvas, and ships without
-requiring any external runtime installation.
+A single `.exe` that loads 32-bit game DLLs via P/Invoke, renders the map
+on a hardware-accelerated WPF Canvas, and runs on any machine with the
+.NET 8 x86 runtime installed.
 
 ---
 

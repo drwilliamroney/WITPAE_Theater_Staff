@@ -20,11 +20,10 @@
     <AssemblyName>WitpaeTheaterStaff</AssemblyName>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
-    <!-- Embed the runtime so the .exe is self-contained on target machines -->
+    <!-- Framework-dependent build; target machines require the .NET 8 x86 runtime -->
     <SelfContained>false</SelfContained>
   </PropertyGroup>
 
-  <!-- Publish profile: self-contained single-file x86 -->
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <Optimize>true</Optimize>
   </PropertyGroup>

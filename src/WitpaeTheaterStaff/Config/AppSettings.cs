@@ -150,12 +150,15 @@ public sealed class AppSettings
                         "ALLIES" => "ALLIED",
                         _        => Side,
                     };
+                    i++;
                     break;
                 case "--game-path":
                     GameDir = args[i + 1];
+                    i++;
                     break;
                 case "--save-path":
                     SaveDir = args[i + 1];
+                    i++;
                     break;
             }
         }

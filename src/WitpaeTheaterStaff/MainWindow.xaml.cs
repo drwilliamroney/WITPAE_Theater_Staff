@@ -280,6 +280,8 @@ public partial class MainWindow : Window
         UIElement? hit = HitTestOverlay(pos);
         if (hit?.Tag is { } tag)
             MapCanvas.ToolTip = HexTooltip.Build(tag);
+        else
+            MapCanvas.ToolTip = null;
     }
 
     private void MapCanvas_MouseLeave(object sender, MouseEventArgs e)

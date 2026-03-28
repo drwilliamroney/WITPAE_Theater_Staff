@@ -45,7 +45,10 @@ Push-Location $PSScriptRoot
 function Write-Step  ([string]$msg) { Write-Host "`n[INFO] $msg"    -ForegroundColor Cyan  }
 function Write-Ok    ([string]$msg) { Write-Host "[INFO] $msg"     -ForegroundColor Green }
 function Write-Warn  ([string]$msg) { Write-Host "[WARN] $msg"     -ForegroundColor Yellow }
-function Write-Fail  ([string]$msg) { Write-Host "`n[ERROR] $msg"  -ForegroundColor Red; exit 1 }
+function Write-Fail  ([string]$msg) { Write-Host "`n[ERROR] $msg"  -ForegroundColor Red; throw $msg }
+
+try
+{
 
 # ── 1. Verify .NET SDK ────────────────────────────────────────────────────────
 Write-Step 'Checking .NET SDK...'
@@ -113,4 +116,9 @@ if ($doTests) {
 $outDir = Join-Path $PSScriptRoot "src\WitpaeTheaterStaff\bin\$Configuration\net8.0-windows\x86\"
 Write-Host ''
 Write-Ok "Done.  Output: $outDir"
-Pop-Location
+
+}
+finally
+{
+    Pop-Location
+}

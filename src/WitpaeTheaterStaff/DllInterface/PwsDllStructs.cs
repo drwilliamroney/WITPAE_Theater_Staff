@@ -297,7 +297,7 @@ public struct PWSTaskGroup
     public int    Endurance;         // offset 4
     public int    EnduranceRequired; // offset 8
     [MarshalAs(UnmanagedType.ByValArray, SizeConst = 32)] public byte[] Skip2;
-    public int    FlagshipId;        // offset 44 (32+8+4=44? let's verify)
+    public int    FlagshipId;        // Flagship unit identifier (see PWSTaskGroup in pwsdll.py)
     [MarshalAs(UnmanagedType.ByValArray, SizeConst = 6)]  public byte[] Skip3;
     public ushort HomePortId;
     [MarshalAs(UnmanagedType.ByValArray, SizeConst = 292)] public byte[] Skip4;
