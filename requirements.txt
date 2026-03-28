@@ -1,0 +1,7 @@
+# WITPAE Theater Staff — Python dependencies
+#
+# This application currently relies only on the Python standard library
+# (tkinter is included with the 32-bit Python installer for Windows).
+#
+# Add third-party packages below using pinned versions, e.g.:
+#   some-package==1.2.3
