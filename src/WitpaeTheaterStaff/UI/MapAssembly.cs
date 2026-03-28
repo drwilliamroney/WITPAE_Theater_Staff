@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
@@ -62,9 +64,12 @@ public static class MapAssembly
                 {
                     var img = new BitmapImage();
                     img.BeginInit();
-                    img.UriSource    = new Uri(p, UriKind.Absolute);
-                    img.CacheOption  = BitmapCacheOption.OnLoad;
-                    img.EndInit();
+                    img.CacheOption = BitmapCacheOption.OnLoad;
+                    using (var s = File.OpenRead(p))
+                    {
+                        img.StreamSource = s;
+                        img.EndInit();
+                    }
                     img.Freeze();
                     return img;
                 })

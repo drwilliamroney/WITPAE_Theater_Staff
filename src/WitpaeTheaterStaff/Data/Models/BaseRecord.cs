@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace WitpaeTheaterStaff.Data.Models;
 
 /// <summary>A single base location extracted from the game save file.</summary>

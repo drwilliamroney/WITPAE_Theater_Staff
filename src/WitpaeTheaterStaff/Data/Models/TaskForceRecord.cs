@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace WitpaeTheaterStaff.Data.Models;
 
 /// <summary>A single task force extracted from the game save file.</summary>

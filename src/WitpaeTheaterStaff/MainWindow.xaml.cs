@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -130,8 +131,8 @@ public partial class MainWindow : Window
         _overlayBuilder.Build(_state);
         ApplyOverlayVisibility();
 
-        TurnLabel.Text = $"Turn: {_state.TurnInfo.GameTurn}";
-        DateLabel.Text = _state.TurnInfo.GameDate is { Length: > 0 } d
+        TurnLabel.Content = $"Turn: {_state.TurnInfo.GameTurn}";
+        DateLabel.Content = _state.TurnInfo.GameDate is { Length: > 0 } d
             ? $"Date: {d}" : "Date: —";
     }
 
@@ -277,7 +278,7 @@ public partial class MainWindow : Window
         if (_overlayBuilder is null) return;
 
         Point pos = e.GetPosition(MapCanvas);
-        UIElement? hit = HitTestOverlay(pos);
+        FrameworkElement? hit = HitTestOverlay(pos);
         if (hit?.Tag is { } tag)
             MapCanvas.ToolTip = HexTooltip.Build(tag);
         else
@@ -294,12 +295,12 @@ public partial class MainWindow : Window
         if (_overlayBuilder is null) return;
 
         Point pos = e.GetPosition(MapCanvas);
-        UIElement? hit = HitTestOverlay(pos);
+        FrameworkElement? hit = HitTestOverlay(pos);
         if (hit?.Tag is { } tag)
             DetailPanel.ShowObject(tag);
     }
 
-    private UIElement? HitTestOverlay(Point pos)
+    private FrameworkElement? HitTestOverlay(Point pos)
     {
         // Walk children in reverse (top-most canvas first), skip map image
         for (int i = MapCanvas.Children.Count - 1; i >= 0; i--)
@@ -309,11 +310,12 @@ public partial class MainWindow : Window
 
             foreach (UIElement child in oc.Children)
             {
-                if (!child.IsVisible) continue;
-                var bounds = VisualTreeHelper.GetDescendantBounds(child);
-                var offset = child.TranslatePoint(new Point(0, 0), MapCanvas);
+                if (child is not FrameworkElement fe) continue;
+                if (!fe.IsVisible) continue;
+                var bounds = VisualTreeHelper.GetDescendantBounds(fe);
+                var offset = fe.TranslatePoint(new Point(0, 0), MapCanvas);
                 var rect   = new Rect(offset, new Size(bounds.Width, bounds.Height));
-                if (rect.Contains(pos)) return child;
+                if (rect.Contains(pos)) return fe;
             }
         }
         return null;
