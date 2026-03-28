@@ -291,7 +291,6 @@ public sealed class GameDataScraper : IDisposable
 
         // ── Task forces ───────────────────────────────────────────────────
         IntPtr tfPtr = _pws.GetTaskGroupPtr(_endOfDayFile);
-        IntPtr sodTfPtr = _pws.GetTaskGroupPtr(_startOfDayFile);
         int tfStride = Marshal.SizeOf<PWSTaskGroup>();
         var taskForces = new List<TaskForceRecord>();
 
