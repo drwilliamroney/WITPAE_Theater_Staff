@@ -42,10 +42,29 @@ $ErrorActionPreference = 'Stop'
 # ── Resolve script root ───────────────────────────────────────────────────────
 Push-Location $PSScriptRoot
 
+$x86Dotnet = 'C:\Program Files (x86)\dotnet\dotnet.exe'
+
 function Write-Step  ([string]$msg) { Write-Host "`n[INFO] $msg"    -ForegroundColor Cyan  }
 function Write-Ok    ([string]$msg) { Write-Host "[INFO] $msg"     -ForegroundColor Green }
 function Write-Warn  ([string]$msg) { Write-Host "[WARN] $msg"     -ForegroundColor Yellow }
 function Write-Fail  ([string]$msg) { Write-Host "`n[ERROR] $msg"  -ForegroundColor Red; throw $msg }
+
+function Ensure-X86DesktopRuntime {
+    if (Test-Path $x86Dotnet) {
+        $runtimes = & $x86Dotnet --list-runtimes
+        if ($runtimes -match 'Microsoft\.WindowsDesktop\.App 8\.') {
+            return
+        }
+    }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Fail '.NET 8 x86 Windows Desktop Runtime is required. Install with: winget install --id Microsoft.DotNet.DesktopRuntime.8 --architecture x86'
+    }
+
+    Write-Step 'Installing missing .NET 8 x86 Windows Desktop Runtime...'
+    & winget install --id Microsoft.DotNet.DesktopRuntime.8 --architecture x86 --accept-package-agreements --accept-source-agreements --silent
+    if ($LASTEXITCODE -ne 0) { Write-Fail 'Failed to install .NET 8 x86 Windows Desktop Runtime.' }
+}
 
 try
 {
@@ -101,6 +120,7 @@ Write-Ok "  Build succeeded: $Configuration|x86"
 
 # ── 6. Tests (optional) ───────────────────────────────────────────────────────
 if ($doTests) {
+    Ensure-X86DesktopRuntime
     Write-Step 'Running unit tests...'
     & dotnet test WITPAE_Theater_Staff.sln `
         -c $Configuration `

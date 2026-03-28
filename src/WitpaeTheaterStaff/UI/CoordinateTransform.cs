@@ -89,8 +89,12 @@ public sealed class CoordinateTransform
     /// </summary>
     public (int HexX, int HexY) PixelToHex(double pixelX, double pixelY)
     {
-        int hexX = (int)Math.Round((pixelX - (_stepX * _zoom / 2.0)) / (_stepX * _zoom)) + 1;
-        int hexY = (int)Math.Round((pixelY - (_stepY * _zoom / 2.0)) / (_stepY * _zoom)) + 1;
+        int hexX = pixelX >= _canvasWidth * _zoom
+            ? GameCols
+            : (int)Math.Round((pixelX - (_stepX * _zoom / 2.0)) / (_stepX * _zoom)) + 1;
+        int hexY = pixelY >= _canvasHeight * _zoom
+            ? GameRows
+            : (int)Math.Round((pixelY - (_stepY * _zoom / 2.0)) / (_stepY * _zoom)) + 1;
         return (Math.Clamp(hexX, 1, GameCols), Math.Clamp(hexY, 1, GameRows));
     }
 }

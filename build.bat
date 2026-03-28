@@ -18,6 +18,39 @@ rem    .NET 8 SDK — https://dotnet.microsoft.com/download
 rem ============================================================
 
 set "DEFAULT_CONFIG=Release"
+set "X86_DOTNET=C:\Program Files (x86)\dotnet\dotnet.exe"
+
+goto main
+
+:ensure_runtime
+if not exist "%X86_DOTNET%" goto install_runtime
+"%X86_DOTNET%" --list-runtimes | findstr /R /C:"Microsoft.WindowsDesktop.App 8\.[0-9]" >nul 2>&1
+if not errorlevel 1 goto :eof
+
+:install_runtime
+where winget >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo [ERROR] .NET 8 x86 Windows Desktop Runtime is required to run tests locally.
+    echo         Install it with:
+    echo         winget install --id Microsoft.DotNet.DesktopRuntime.8 --architecture x86
+    echo.
+    pause
+    exit /b 1
+)
+
+echo.
+echo [INFO] Installing missing .NET 8 x86 Windows Desktop Runtime...
+winget install --id Microsoft.DotNet.DesktopRuntime.8 --architecture x86 --accept-package-agreements --accept-source-agreements --silent
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Failed to install .NET 8 x86 Windows Desktop Runtime.
+    pause
+    exit /b 1
+)
+goto :eof
+
+:main
 
 rem ── 1. Verify .NET SDK is available ──────────────────────────────────────
 where dotnet >nul 2>&1
@@ -86,6 +119,7 @@ echo [INFO] Build succeeded: !BUILD_CONFIG!^|x86
 
 rem ── 6. Tests (optional) ──────────────────────────────────────────────────
 if /I "!RUN_TESTS!"=="y" (
+    call :ensure_runtime
     echo.
     echo [INFO] Running unit tests...
     dotnet test WITPAE_Theater_Staff.sln ^
