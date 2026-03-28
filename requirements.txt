@@ -1,7 +1,17 @@
 # WITPAE Theater Staff — Python dependencies
 #
-# This application currently relies only on the Python standard library
-# (tkinter is included with the 32-bit Python installer for Windows).
+# Target: 32-bit Python 3.10–3.13 (x86) on Windows.
+# All packages below have confirmed win32 wheels on PyPI.
 #
-# Add third-party packages below using pinned versions, e.g.:
-#   some-package==1.2.3
+# wxPython — native Windows desktop GUI framework with full alpha-blended
+#   rendering via wx.GraphicsContext.  PyQt5/PySide6 are NOT used: Qt6 has
+#   no 32-bit Windows support, and PyQt5 32-bit support ends at Python 3.9.
+#
+# Pillow — assembles the game base-map from 7x6 BMP art tiles and converts
+#   images to wx.Bitmap for display on the map canvas.
+#
+# rich — coloured console / logging output (already used by pywitpaescraper).
+
+wxPython==4.2.5
+Pillow==12.1.1
+rich>=13.0.0

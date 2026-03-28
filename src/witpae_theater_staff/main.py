@@ -1,82 +1,165 @@
-"""WITPAE Theater Staff — main application entry point.
+"""WITPAE Theater Staff — application entry point.
 
 Launch with:
     python src/witpae_theater_staff/main.py
 or via the provided run_gui.bat launcher on Windows.
+
+Requires: 32-bit Python 3.10–3.13, wxPython 4.2.5.
 """
 
-import tkinter as tk
-from tkinter import ttk
+import logging
+import sys
+
+import wx
+
+logger = logging.getLogger(__name__)
+
+APP_TITLE = "WITPAE Theater Staff"
+
+
+class MainFrame(wx.Frame):
+    """Top-level application window."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            parent=None,
+            title=APP_TITLE,
+            size=(1200, 800),
+            style=wx.DEFAULT_FRAME_STYLE,
+        )
+        self._build_ui()
+        self.Centre()
+
+    # ── UI construction ───────────────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        """Construct the main window layout."""
+        # ── Root sizer: layer panel | map+info column ─────────────────────────
+        root_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        # ── Layer toggle panel (left) ─────────────────────────────────────────
+        layer_panel = self._make_layer_panel()
+        root_sizer.Add(layer_panel, 0, wx.EXPAND | wx.ALL, 4)
+
+        # ── Right column: map canvas + info panel ─────────────────────────────
+        right_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        map_placeholder = self._make_map_placeholder()
+        right_sizer.Add(map_placeholder, 1, wx.EXPAND | wx.ALL, 4)
+
+        info_panel = self._make_info_panel()
+        right_sizer.Add(info_panel, 0, wx.EXPAND | wx.ALL, 4)
+
+        root_sizer.Add(right_sizer, 1, wx.EXPAND)
+
+        # ── Status bar ────────────────────────────────────────────────────────
+        self.CreateStatusBar(3)
+        self.SetStatusWidths([-1, 200, 160])
+        self.SetStatusText("Ready", 0)
+        self.SetStatusText("No save file loaded", 1)
+        self.SetStatusText("", 2)
+
+        # ── Apply ─────────────────────────────────────────────────────────────
+        panel = wx.Panel(self)
+        panel.SetSizer(root_sizer)
+        frame_sizer = wx.BoxSizer()
+        frame_sizer.Add(panel, 1, wx.EXPAND)
+        self.SetSizer(frame_sizer)
+        self.Layout()
+
+    def _make_layer_panel(self) -> wx.Panel:
+        """Build the left-hand overlay layer toggle panel."""
+        panel = wx.Panel(self, size=(160, -1))
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        title = wx.StaticText(panel, label="Overlay Layers")
+        title.SetFont(
+            title.GetFont().Bold()
+        )
+        sizer.Add(title, 0, wx.ALL, 6)
+        sizer.Add(wx.StaticLine(panel), 0, wx.EXPAND | wx.LEFT | wx.RIGHT, 4)
+
+        # Placeholder layer checkboxes — will be replaced by OverlayManager
+        # wiring once the overlay system is implemented.
+        _PLACEHOLDER_LAYERS = [
+            "Regions",
+            "Bases",
+            "Task Forces",
+            "Threats",
+            "Air Groups",
+            "Ground Units",
+            "Sea Areas",
+        ]
+        for name in _PLACEHOLDER_LAYERS:
+            cb = wx.CheckBox(panel, label=name)
+            cb.SetValue(True)
+            sizer.Add(cb, 0, wx.ALL, 4)
+
+        panel.SetSizer(sizer)
+        return panel
+
+    def _make_map_placeholder(self) -> wx.Panel:
+        """Placeholder for the MapPanel (wx.ScrolledWindow + wx.GraphicsContext).
+
+        This will be replaced with the full MapPanel implementation once the
+        overlay and coordinate-transform modules are in place.
+        """
+        panel = wx.Panel(self, style=wx.SUNKEN_BORDER)
+        panel.SetBackgroundColour(wx.Colour(26, 58, 26))  # dark map green
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        label = wx.StaticText(
+            panel,
+            label="[ Map canvas — coming soon ]\n\nWill display the WitPAE map with\nalpha-blended overlay layers via\nwx.GraphicsContext.",
+            style=wx.ALIGN_CENTRE_HORIZONTAL,
+        )
+        label.SetForegroundColour(wx.Colour(76, 175, 80))
+        label.SetFont(
+            wx.Font(
+                12,
+                wx.FONTFAMILY_TELETYPE,
+                wx.FONTSTYLE_NORMAL,
+                wx.FONTWEIGHT_NORMAL,
+            )
+        )
+        sizer.AddStretchSpacer()
+        sizer.Add(label, 0, wx.ALIGN_CENTER | wx.ALL, 20)
+        sizer.AddStretchSpacer()
+        panel.SetSizer(sizer)
+        return panel
+
+    def _make_info_panel(self) -> wx.Panel:
+        """Build the click-through information panel below the map."""
+        panel = wx.Panel(self, size=(-1, 140))
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        title = wx.StaticText(panel, label="Hex Information  (click map to populate)")
+        title.SetFont(title.GetFont().Bold())
+        sizer.Add(title, 0, wx.ALL, 6)
+
+        self._info_text = wx.TextCtrl(
+            panel,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_RICH2 | wx.BORDER_SUNKEN,
+        )
+        self._info_text.SetFont(
+            wx.Font(9, wx.FONTFAMILY_TELETYPE, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_NORMAL)
+        )
+        sizer.Add(self._info_text, 1, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 4)
+
+        panel.SetSizer(sizer)
+        return panel
 
 
 def main() -> None:
-    """Create and run the WITPAE Theater Staff GUI application."""
-    root = tk.Tk()
-    root.title("WITPAE Theater Staff")
-    root.geometry("800x600")
-    root.resizable(True, True)
-
-    # ── Root grid weights ────────────────────────────────────────────────────
-    root.columnconfigure(0, weight=1)
-    root.rowconfigure(0, weight=1)
-
-    # ── Main frame ───────────────────────────────────────────────────────────
-    main_frame = ttk.Frame(root, padding=20)
-    main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
-    main_frame.columnconfigure(0, weight=1)
-    main_frame.rowconfigure(2, weight=1)
-
-    # ── Title label ──────────────────────────────────────────────────────────
-    title_label = ttk.Label(
-        main_frame,
-        text="WITPAE Theater Staff",
-        font=("Arial", 28, "bold"),
-        anchor=tk.CENTER,
+    """Create and run the WITPAE Theater Staff application."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    title_label.grid(row=0, column=0, pady=(20, 5), sticky=(tk.W, tk.E))
-
-    # ── Subtitle label ───────────────────────────────────────────────────────
-    subtitle_label = ttk.Label(
-        main_frame,
-        text="War in the Pacific Admiral's Edition — Theater Staff Tool",
-        font=("Arial", 13),
-        anchor=tk.CENTER,
-    )
-    subtitle_label.grid(row=1, column=0, pady=(0, 20), sticky=(tk.W, tk.E))
-
-    # ── Placeholder canvas (future hex-map area) ─────────────────────────────
-    canvas = tk.Canvas(main_frame, background="#1a3a1a", relief=tk.SUNKEN, bd=2)
-    canvas.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=10)
-    canvas.bind(
-        "<Configure>",
-        lambda event: _draw_placeholder(canvas, event.width, event.height),
-    )
-
-    # ── Status bar ───────────────────────────────────────────────────────────
-    status_bar = ttk.Label(
-        main_frame,
-        text="Ready",
-        relief=tk.SUNKEN,
-        anchor=tk.W,
-        padding=(4, 2),
-    )
-    status_bar.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(10, 0))
-
-    root.mainloop()
-
-
-def _draw_placeholder(canvas: tk.Canvas, width: int, height: int) -> None:
-    """Draw a placeholder message on the map canvas."""
-    canvas.delete("all")
-    cx, cy = width // 2, height // 2
-    canvas.create_text(
-        cx,
-        cy,
-        text="[ Map / Hex-Grid Area — Coming Soon ]",
-        fill="#4caf50",
-        font=("Courier New", 14),
-        anchor=tk.CENTER,
-    )
+    app = wx.App(redirect=False)
+    frame = MainFrame()
+    frame.Show()
+    app.MainLoop()
 
 
 if __name__ == "__main__":

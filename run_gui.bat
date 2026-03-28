@@ -4,22 +4,24 @@ setlocal enabledelayedexpansion
 :: ============================================================================
 :: run_gui.bat — WITPAE Theater Staff launcher
 ::
-:: 1. Locates a 32-bit (x86) Python 3 interpreter
+:: 1. Locates a 32-bit (x86) Python 3.10–3.13 interpreter
+::    (wxPython 4.2.5 requires Python 3.10+; Python 3.9 is EOL Oct 2025)
 :: 2. Performs a git pull to get the latest code
 :: 3. Creates / reuses a .venv virtual environment
 :: 4. Installs / updates dependencies from requirements.txt
+::    (wxPython 4.2.5 + Pillow 12.x — both have win32 wheels on PyPI)
 :: 5. Starts the application
 :: ============================================================================
 
 set SCRIPT_DIR=%~dp0
 
-:: ── Step 1: Find a 32-bit Python interpreter ────────────────────────────────
-echo [1/4] Checking for a 32-bit Python interpreter...
+:: ── Step 1: Find a 32-bit Python 3.10–3.13 interpreter ──────────────────────
+echo [1/4] Checking for a 32-bit Python 3.10–3.13 interpreter...
 
 set PYTHON32=
 
-:: Check common per-user 32-bit installation paths first
-for %%V in (313 312 311 310 39) do (
+:: Check common per-user 32-bit installation paths (prefer newer versions)
+for %%V in (313 312 311 310) do (
     for %%P in (
         "%LocalAppData%\Programs\Python\Python%%V-32\python.exe"
         "%ProgramFiles(x86)%\Python%%V\python.exe"
@@ -30,11 +32,11 @@ for %%V in (313 312 311 310 39) do (
     )
 )
 
-:: Fall back to whatever "python" is on PATH — accept it only if it is 32-bit
+:: Fall back to whatever "python" is on PATH — accept only if 32-bit AND >=3.10
 if "!PYTHON32!"=="" (
     where python >nul 2>&1
     if !errorlevel! == 0 (
-        python -c "import struct, sys; sys.exit(0 if struct.calcsize('P')*8==32 else 1)" >nul 2>&1
+        python -c "import struct, sys; ok = struct.calcsize('P')*8==32 and sys.version_info>=(3,10); sys.exit(0 if ok else 1)" >nul 2>&1
         if !errorlevel! == 0 (
             set PYTHON32=python
         )
@@ -43,10 +45,14 @@ if "!PYTHON32!"=="" (
 
 if "!PYTHON32!"=="" (
     echo.
-    echo  ERROR: No 32-bit ^(x86^) Python 3 interpreter found.
-    echo  Please install a 32-bit Python release from:
+    echo  ERROR: No 32-bit ^(x86^) Python 3.10–3.13 interpreter found.
+    echo.
+    echo  wxPython 4.2.5 requires Python 3.10 or later ^(32-bit^).
+    echo  Python 3.9 is NOT supported ^(end-of-life Oct 2025^).
+    echo.
+    echo  Install a 32-bit Python 3.11 or 3.12 release from:
     echo    https://www.python.org/downloads/windows/
-    echo  Make sure to select the "Windows installer (32-bit)" option.
+    echo  Select the "Windows installer (32-bit)" option.
     echo.
     pause
     exit /b 1
@@ -86,6 +92,7 @@ call "%VENV_DIR%\Scripts\activate.bat"
 :: ── Step 4: Install / update dependencies ────────────────────────────────────
 echo.
 echo [4/4] Installing dependencies...
+echo  ^(wxPython 4.2.5 is ~130 MB — first install may take a few minutes^)
 python -m pip install --upgrade pip --quiet
 pip install -r "%SCRIPT_DIR%requirements.txt" --quiet
 if !errorlevel! neq 0 (
