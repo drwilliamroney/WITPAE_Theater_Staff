@@ -74,3 +74,7 @@ python src\witpae_theater_staff\main.py
 ```
 
 See `.github/copilot-instructions.md` for coding conventions and domain vocabulary.
+
+See [`docs/technology-comparison.md`](docs/technology-comparison.md) for a
+detailed comparison of Python vs Visual Studio Community Edition (C# / C++)
+options and the rationale for the current technology choice.
