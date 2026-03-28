@@ -33,6 +33,8 @@ public sealed class CoordinateTransform
 
     private readonly double _stepX;
     private readonly double _stepY;
+    private readonly double _canvasWidth;
+    private readonly double _canvasHeight;
     private readonly double _zoom;
 
     /// <summary>
@@ -53,6 +55,8 @@ public sealed class CoordinateTransform
         if (canvasHeight <= 0) throw new ArgumentOutOfRangeException(nameof(canvasHeight));
         if (zoom         <= 0) throw new ArgumentOutOfRangeException(nameof(zoom));
 
+        _canvasWidth = canvasWidth;
+        _canvasHeight = canvasHeight;
         _zoom  = zoom;
         _stepX = canvasWidth  / (GameCols - 1);
         _stepY = canvasHeight / (GameRows - 1);
@@ -70,9 +74,14 @@ public sealed class CoordinateTransform
     /// Returns the center pixel of hex (<paramref name="hexX"/>,
     /// <paramref name="hexY"/>) on the unzoomed canvas, then scales by zoom.
     /// </summary>
-    public (double X, double Y) HexToCenter(int hexX, int hexY) =>
-        ((hexX - 1) * _stepX * _zoom + _stepX * _zoom / 2.0,
-         (hexY - 1) * _stepY * _zoom + _stepY * _zoom / 2.0);
+    public (double X, double Y) HexToCenter(int hexX, int hexY)
+    {
+        double x = (hexX - 1) * _stepX * _zoom + _stepX * _zoom / 2.0;
+        double y = (hexY - 1) * _stepY * _zoom + _stepY * _zoom / 2.0;
+        return (
+            Math.Clamp(x, 0, _canvasWidth * _zoom),
+            Math.Clamp(y, 0, _canvasHeight * _zoom));
+    }
 
     /// <summary>
     /// Converts a canvas pixel position (after zoom) back to the nearest
@@ -80,8 +89,8 @@ public sealed class CoordinateTransform
     /// </summary>
     public (int HexX, int HexY) PixelToHex(double pixelX, double pixelY)
     {
-        int hexX = (int)Math.Round(pixelX / (_stepX * _zoom)) + 1;
-        int hexY = (int)Math.Round(pixelY / (_stepY * _zoom)) + 1;
+        int hexX = (int)Math.Round((pixelX - (_stepX * _zoom / 2.0)) / (_stepX * _zoom)) + 1;
+        int hexY = (int)Math.Round((pixelY - (_stepY * _zoom / 2.0)) / (_stepY * _zoom)) + 1;
         return (Math.Clamp(hexX, 1, GameCols), Math.Clamp(hexY, 1, GameRows));
     }
 }
