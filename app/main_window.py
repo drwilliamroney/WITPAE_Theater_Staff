@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 from PyQt5.QtCore import QPointF, QTimer, Qt
-from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainterPath, QPen, QPixmap, QPolygonF
+from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt5.QtWidgets import (
     QAction,
     QDialog,
@@ -29,6 +29,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QTextEdit,
     QToolBar,
+    QToolTip,
     QMessageBox,
     QVBoxLayout,
 )
@@ -42,23 +43,25 @@ logger = logging.getLogger(__name__)
 
 def pil_image_to_qpixmap(image: Image.Image) -> QPixmap:
     """Convert a PIL image to QPixmap without relying on Pillow's Qt adapters."""
-    rgba_image = image.convert("RGBA")
-    image_bytes = rgba_image.tobytes("raw", "RGBA")
-    qimage = QImage(image_bytes, rgba_image.width, rgba_image.height, rgba_image.width * 4, QImage.Format_RGBA8888)
+    rgb_image = image.convert("RGB")
+    image_bytes = rgb_image.tobytes("raw", "RGB")
+    qimage = QImage(image_bytes, rgb_image.width, rgb_image.height, rgb_image.width * 3, QImage.Format_RGB888)
     return QPixmap.fromImage(qimage.copy())
 
 
-def prepare_display_image(image: Image.Image, max_dimension: int = 4096) -> Image.Image:
-    """Scale oversized maps down to a Qt-friendly display size for 32-bit processes."""
+def add_tiled_map_to_scene(scene: QGraphicsScene, image: Image.Image, tile_size: int = 1024) -> tuple[int, int]:
+    """Add a full-resolution map image to the scene using tiled pixmap items."""
     width, height = image.size
-    largest_dimension = max(width, height)
-    if largest_dimension <= max_dimension:
-        return image
-
-    scale = max_dimension / float(largest_dimension)
-    display_size = (max(1, int(width * scale)), max(1, int(height * scale)))
-    logger.info("Scaling display map from %sx%s to %sx%s for Qt rendering", width, height, display_size[0], display_size[1])
-    return image.resize(display_size, Image.Resampling.LANCZOS)
+    for top in range(0, height, tile_size):
+        for left in range(0, width, tile_size):
+            right = min(left + tile_size, width)
+            bottom = min(top + tile_size, height)
+            tile = image.crop((left, top, right, bottom))
+            tile_item = QGraphicsPixmapItem(pil_image_to_qpixmap(tile))
+            tile_item.setPos(left, top)
+            tile_item.setZValue(0)
+            scene.addItem(tile_item)
+    return width, height
 
 
 class MapView(QGraphicsView):
@@ -68,8 +71,10 @@ class MapView(QGraphicsView):
         super().__init__(scene, parent)
         self._main_window = parent
         self.setDragMode(QGraphicsView.ScrollHandDrag)
-        self.setRenderHints(self.renderHints())
+        self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        self.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setMouseTracking(True)
 
     def wheelEvent(self, event) -> None:  # noqa: N802
@@ -81,8 +86,15 @@ class MapView(QGraphicsView):
         super().wheelEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802
+        scene_pos = self.mapToScene(event.pos())
         if isinstance(self._main_window, MainWindow):
-            self._main_window.on_map_hover(self.mapToScene(event.pos()))
+            self._main_window.on_map_hover(scene_pos)
+            if self._main_window._show_mouse_pixel_debug:
+                QToolTip.showText(
+                    event.globalPos(),
+                    f"px ({scene_pos.x():.1f}, {scene_pos.y():.1f})",
+                    self.viewport(),
+                )
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -109,12 +121,24 @@ class MainWindow(QMainWindow):
         "-multiaudio",
         "-w",
     ]
+    # Locked calibration values.
+    # These were finalized after WPEH00.bmp measurement (42x38 spacing) plus in-app spot checks
+    # across multiple map locations, yielding typical residual error within ~1-2 px.
+    # Do not tune these by eye; only change after rerunning the documented calibration workflow.
+    HEX_CENTER_X_1_1 = 24.0
+    HEX_CENTER_Y_1_1 = 8.0
+    HEX_STEP_X = 42.0
+    HEX_STEP_Y = 38.0
+    HEX_ANCHOR_ADJUST_X = 19.0
+    HEX_ANCHOR_ADJUST_Y = 17.0
+    SHIFT_EVEN_ROWS_RIGHT = True
 
     def __init__(self, game_dir: Path, save_path: Path, side: str) -> None:
         super().__init__()
         self._game_dir = game_dir
         self._save_path = save_path
         self._side = side
+        self._show_mouse_pixel_debug = True
         self._scene = QGraphicsScene(self)
         self._regions_visible = True
         self._region_items: list[object] = []
@@ -127,7 +151,8 @@ class MainWindow(QMainWindow):
         self._detail_panel: QTextEdit | None = None
         self._map_width = 0
         self._map_height = 0
-        self._hex_size = 0.0
+        self._hex_size_x = 0.0
+        self._hex_size_y = 0.0
         self._hex_width = 0.0
         self._hex_origin_x = 0.0
         self._hex_origin_y = 0.0
@@ -197,13 +222,9 @@ class MainWindow(QMainWindow):
 
     def _load_map(self) -> None:
         assembly = MapAssembly(self._game_dir)
-        display_image = prepare_display_image(assembly.image)
-        pixmap = pil_image_to_qpixmap(display_image)
-        self._map_width = pixmap.width()
-        self._map_height = pixmap.height()
 
         self._scene.clear()
-        self._scene.addItem(QGraphicsPixmapItem(pixmap))
+        self._map_width, self._map_height = add_tiled_map_to_scene(self._scene, assembly.image)
         self._scene.setSceneRect(0, 0, self._map_width, self._map_height)
         self._build_regions_overlay(self._map_width, self._map_height)
         self._build_hex_grid_overlay(self._map_width, self._map_height)
@@ -218,6 +239,11 @@ class MainWindow(QMainWindow):
             f"{map_source}; regions: {'on' if self._regions_visible else 'off'}; "
             f"hexgrid: {'on' if self._hex_grid_visible else 'off'}"
         )
+
+        if self._map_view is not None:
+            self._map_view.resetTransform()
+            self._map_view.horizontalScrollBar().setValue(0)
+            self._map_view.verticalScrollBar().setValue(0)
 
     def _build_regions_overlay(self, map_width: int, map_height: int) -> None:
         self._region_items.clear()
@@ -260,31 +286,30 @@ class MainWindow(QMainWindow):
         rows = GAME_ROWS
         sqrt3 = math.sqrt(3.0)
 
-        size_from_width = map_width / (sqrt3 * (cols + 0.5))
-        size_from_height = map_height / (1.5 * rows + 0.5)
-        hex_size = min(size_from_width, size_from_height)
-
-        hex_width = sqrt3 * hex_size
-        grid_width = hex_width * (cols + 0.5)
-        grid_height = hex_size * (1.5 * rows + 0.5)
-        origin_x = (map_width - grid_width) / 2.0 + (hex_width / 2.0)
-        origin_y = (map_height - grid_height) / 2.0 + hex_size
-        self._hex_size = hex_size
+        # Locked: measured center-to-center spacing from ART\WPEH00.bmp.
+        hex_width = self.HEX_STEP_X
+        hex_size_x = hex_width / sqrt3
+        hex_size_y = self.HEX_STEP_Y / 1.5
+        # Locked: calibrated anchor for hex (1,1), including legacy 19x17 anchor adjustment.
+        origin_x = self.HEX_CENTER_X_1_1 + self.HEX_ANCHOR_ADJUST_X
+        origin_y = self.HEX_CENTER_Y_1_1 + self.HEX_ANCHOR_ADJUST_Y
+        self._hex_size_x = hex_size_x
+        self._hex_size_y = hex_size_y
         self._hex_width = hex_width
         self._hex_origin_x = origin_x
         self._hex_origin_y = origin_y
 
         path = QPainterPath()
         for row in range(rows):
-            row_offset = 0.5 if (row % 2 == 1) else 0.0
-            center_y = origin_y + (1.5 * hex_size * row)
+            row_offset = self._row_offset(row)
+            center_y = origin_y + (1.5 * hex_size_y * row)
             for col in range(cols):
                 center_x = origin_x + (hex_width * (col + row_offset))
                 vertices = []
                 for i in range(6):
                     angle = math.radians(60 * i - 90)
-                    vx = center_x + hex_size * math.cos(angle)
-                    vy = center_y + hex_size * math.sin(angle)
+                    vx = center_x + hex_size_x * math.cos(angle)
+                    vy = center_y + hex_size_y * math.sin(angle)
                     vertices.append(QPointF(vx, vy))
 
                 path.moveTo(vertices[0])
@@ -299,10 +324,15 @@ class MainWindow(QMainWindow):
         self._scene.addItem(grid_item)
         self._hex_grid_items.append(grid_item)
 
+    def _row_offset(self, row_zero: int) -> float:
+        if self.SHIFT_EVEN_ROWS_RIGHT:
+            return 0.5 if (row_zero % 2 == 0) else 0.0
+        return 0.5 if (row_zero % 2 == 1) else 0.0
+
     def _hex_center(self, col_zero: int, row_zero: int) -> QPointF:
-        row_offset = 0.5 if (row_zero % 2 == 1) else 0.0
+        row_offset = self._row_offset(row_zero)
         x = self._hex_origin_x + (self._hex_width * (col_zero + row_offset))
-        y = self._hex_origin_y + (1.5 * self._hex_size * row_zero)
+        y = self._hex_origin_y + (1.5 * self._hex_size_y * row_zero)
         return QPointF(x, y)
 
     def _hex_polygon_for_game_hex(self, game_x: int, game_y: int) -> QPolygonF:
@@ -310,41 +340,61 @@ class MainWindow(QMainWindow):
         vertices: list[QPointF] = []
         for i in range(6):
             angle = math.radians(60 * i - 90)
-            vx = center.x() + self._hex_size * math.cos(angle)
-            vy = center.y() + self._hex_size * math.sin(angle)
+            vx = center.x() + self._hex_size_x * math.cos(angle)
+            vy = center.y() + self._hex_size_y * math.sin(angle)
             vertices.append(QPointF(vx, vy))
         return QPolygonF(vertices)
 
+    @staticmethod
+    def _cube_round(q: float, r: float) -> tuple[int, int]:
+        x = q
+        z = r
+        y = -x - z
+
+        rx = round(x)
+        ry = round(y)
+        rz = round(z)
+
+        x_diff = abs(rx - x)
+        y_diff = abs(ry - y)
+        z_diff = abs(rz - z)
+
+        if x_diff > y_diff and x_diff > z_diff:
+            rx = -ry - rz
+        elif y_diff > z_diff:
+            ry = -rx - rz
+        else:
+            rz = -rx - ry
+
+        return int(rx), int(rz)
+
     def _nearest_game_hex(self, scene_point: QPointF) -> tuple[int, int] | None:
-        if self._hex_size <= 0.0 or self._hex_width <= 0.0:
+        if self._hex_size_x <= 0.0 or self._hex_size_y <= 0.0 or self._hex_width <= 0.0:
             return None
 
-        px = scene_point.x()
-        py = scene_point.y()
+        local_x = scene_point.x() - self._hex_origin_x
+        local_y = scene_point.y() - self._hex_origin_y
 
-        approx_row = int(round((py - self._hex_origin_y) / (1.5 * self._hex_size)))
-        best: tuple[int, int] | None = None
-        best_dist2 = float("inf")
+        norm_x = local_x / self._hex_size_x
+        norm_y = local_y / self._hex_size_y
+        q = ((math.sqrt(3.0) / 3.0) * norm_x - (1.0 / 3.0) * norm_y)
+        r = ((2.0 / 3.0) * norm_y)
+        axial_q, axial_r = self._cube_round(q, r)
 
-        for row_zero in range(max(0, approx_row - 2), min(GAME_ROWS - 1, approx_row + 2) + 1):
-            offset = 0.5 if (row_zero % 2 == 1) else 0.0
-            approx_col = int(round((px - self._hex_origin_x) / self._hex_width - offset))
-            for col_zero in range(max(0, approx_col - 2), min(GAME_COLS - 1, approx_col + 2) + 1):
-                center = self._hex_center(col_zero, row_zero)
-                dx = center.x() - px
-                dy = center.y() - py
-                dist2 = dx * dx + dy * dy
-                if dist2 < best_dist2:
-                    best_dist2 = dist2
-                    best = (col_zero + 1, row_zero + 1)
+        row_zero = axial_r
+        if self.SHIFT_EVEN_ROWS_RIGHT:
+            col_zero = axial_q + ((row_zero + (row_zero & 1)) // 2)
+        else:
+            col_zero = axial_q + ((row_zero - (row_zero & 1)) // 2)
 
-        return best
+        col_zero = max(0, min(GAME_COLS - 1, col_zero))
+        row_zero = max(0, min(GAME_ROWS - 1, row_zero))
+        return (col_zero + 1, row_zero + 1)
 
     def on_map_hover(self, scene_point: QPointF) -> None:
         hex_xy = self._nearest_game_hex(scene_point)
         self._hover_hex = hex_xy
         if self._map_view is not None and hex_xy is not None:
-            self._map_view.setToolTip(f"Hex ({hex_xy[0]},{hex_xy[1]})")
             selection_text = (
                 f" selected ({self._selected_hex[0]},{self._selected_hex[1]})"
                 if self._selected_hex is not None
