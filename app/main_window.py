@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 import math
 import logging
+import subprocess
+import shlex
 from pathlib import Path
 
 from PIL import Image
@@ -12,6 +14,8 @@ from PyQt5.QtCore import QPointF, QTimer, Qt
 from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt5.QtWidgets import (
     QAction,
+    QDialog,
+    QDialogButtonBox,
     QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsPixmapItem,
@@ -21,8 +25,12 @@ from PyQt5.QtWidgets import (
     QMainWindow,
     QProgressDialog,
     QSplitter,
+    QLabel,
+    QLineEdit,
     QTextEdit,
     QToolBar,
+    QMessageBox,
+    QVBoxLayout,
 )
 
 from app.map_assembly import MapAssembly
@@ -86,6 +94,22 @@ class MapView(QGraphicsView):
 class MainWindow(QMainWindow):
     """Main UI shell for map display (overlays intentionally omitted)."""
 
+    GAME_EXECUTABLE = "War in the Pacific Admiral Edition.exe"
+    GAME_START_ARGS = [
+        "-altFont",
+        "-skipVideo",
+        "-archive",
+        "-deepColor",
+        "-dd_sw",
+        "-px1600",
+        "-py900",
+        "-SingleCpuOrders",
+        "-cpu3",
+        "-fixedArt",
+        "-multiaudio",
+        "-w",
+    ]
+
     def __init__(self, game_dir: Path, save_path: Path, side: str) -> None:
         super().__init__()
         self._game_dir = game_dir
@@ -136,6 +160,10 @@ class MainWindow(QMainWindow):
     def _init_toolbar(self) -> None:
         toolbar = QToolBar("Main", self)
         toolbar.setMovable(False)
+        startup_action = QAction("Startup Game", self)
+        startup_action.triggered.connect(self._startup_game)
+        toolbar.addAction(startup_action)
+        toolbar.addSeparator()
         toolbar.addAction(f"Side: {self._side}")
         toolbar.addAction(f"Game Dir: {self._game_dir}")
         self._regions_action = QAction("Regions", self)
@@ -535,3 +563,84 @@ class MainWindow(QMainWindow):
                 lines.append(f"- {file_name}: missing")
 
         self._detail_panel.setPlainText("\n".join(lines))
+
+    def _startup_game(self) -> None:
+        command_parts = self._prompt_startup_command()
+        if command_parts is None:
+            self.statusBar().showMessage("Game launch canceled.")
+            return
+
+        launch_target = Path(command_parts[0])
+        if not launch_target.is_absolute():
+            launch_target = self._game_dir / launch_target
+        if not launch_target.exists():
+            message = f"Game executable not found: {launch_target}"
+            self.statusBar().showMessage(message)
+            QMessageBox.critical(self, "Startup Game", message)
+            return
+
+        launch_cmd = [str(launch_target), *command_parts[1:]]
+
+        try:
+            subprocess.Popen(
+                launch_cmd,
+                cwd=str(self._game_dir),
+                creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            )
+            self.statusBar().showMessage("Game launch requested.")
+        except Exception as exc:
+            logger.exception("Failed to launch game executable: %s", launch_target)
+            message = f"Failed to launch game: {exc}"
+            self.statusBar().showMessage(message)
+            QMessageBox.critical(self, "Startup Game", message)
+
+    def _prompt_startup_command(self) -> list[str] | None:
+        default_command = " ".join([f'"{self.GAME_EXECUTABLE}"', *self.GAME_START_ARGS])
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Startup Game")
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Edit startup command line, then choose Launch or Cancel.", dialog))
+
+        command_edit = QLineEdit(dialog)
+        command_edit.setText(default_command)
+        command_edit.selectAll()
+        layout.addWidget(command_edit)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=dialog)
+        launch_button = button_box.button(QDialogButtonBox.Ok)
+        if launch_button is not None:
+            launch_button.setText("Launch")
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec_() != QDialog.Accepted:
+            return None
+
+        command_text = command_edit.text().strip()
+        if not command_text:
+            QMessageBox.warning(self, "Startup Game", "Command line is empty.")
+            return None
+
+        try:
+            command_parts = shlex.split(command_text, posix=False)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Startup Game", f"Invalid command line: {exc}")
+            return None
+
+        command_parts = [self._strip_wrapping_quotes(part) for part in command_parts]
+
+        if not command_parts:
+            QMessageBox.warning(self, "Startup Game", "Command line did not produce a launch target.")
+            return None
+
+        return command_parts
+
+    @staticmethod
+    def _strip_wrapping_quotes(token: str) -> str:
+        if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}:
+            return token[1:-1]
+        return token
