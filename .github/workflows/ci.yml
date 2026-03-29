@@ -10,36 +10,26 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: Build & Test (x86 Release)
+  lint-and-smoke:
+    name: Lint & Smoke
     runs-on: windows-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
-          dotnet-version: '8.0.x'
+          python-version: '3.13'
 
-      - name: Restore NuGet packages
-        run: dotnet restore WITPAE_Theater_Staff.sln
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
 
-      - name: Build (x86 Release)
-        run: dotnet build WITPAE_Theater_Staff.sln -c Release -p:Platform=x86 --no-restore
+      - name: Syntax check
+        run: python -m compileall app
 
-      - name: Run unit tests (x86 Release)
-        run: >
-          dotnet test WITPAE_Theater_Staff.sln
-          -c Release -p:Platform=x86
-          --no-build
-          --logger "trx;LogFileName=results.trx"
-          --results-directory TestResults
-
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: TestResults/*.trx
+      - name: Smoke import
+        run: python -c "import app.main; print('smoke ok')"

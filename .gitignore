@@ -1,73 +1,31 @@
-## ── Visual Studio / MSBuild ────────────────────────────────────────────────
-.vs/
-*.user
-*.suo
-*.userprefs
-*.pidb
-*.sdf
-*.opensdf
-*.cachefile
-*.VC.db
-*.VC.opendb
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
 
-## ── Build outputs ──────────────────────────────────────────────────────────
-[Bb]in/
-[Oo]bj/
-[Ll]og/
-[Ll]ogs/
+# Virtual environments
+.venv/
+venv/
+
+# Packaging and build
 build/
-publish/
+dist/
+*.egg-info/
 
-## ── NuGet packages (restored on build) ────────────────────────────────────
-packages/
-*.nupkg
-*.snupkg
-project.lock.json
-project.fragment.lock.json
-artifacts/
-**/[Pp]ackages/
+# Test and coverage outputs
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
 
-## ── .NET runtime / publish outputs ────────────────────────────────────────
-*.pdb
-*.mdb
-*.ilk
-*.meta
-*.exp
-*.lib
-*.sbr
-*.tlb
-*.tli
-*.tlh
-*.tmp
-*.tmp_proj
-*.vssscc
-.builds
-*.pidb
-*.svclog
-*.scc
-
-## ── Test results ───────────────────────────────────────────────────────────
-TestResults/
-*.trx
-*.coverage
-*.coveragexml
-coverage-report/
-BenchmarkDotNet.Artifacts/
-
-## ── JetBrains Rider ────────────────────────────────────────────────────────
+# IDE/editor
+.vscode/
 .idea/
-*.sln.iml
 
-## ── Windows ────────────────────────────────────────────────────────────────
+# OS files
 Thumbs.db
 Desktop.ini
-$RECYCLE.BIN/
 
-## ── Local settings / secrets ───────────────────────────────────────────────
-appsettings.local.json
-*.local.json
+# Local env files
 .env
 .env.*
-
-## ── App user settings (written at runtime) ────────────────────────────────
-%APPDATA%/WitpaeTheaterStaff/
