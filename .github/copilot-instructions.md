@@ -6,6 +6,15 @@ This repository is now a Python desktop application implemented with PyQt5.
 The app is Windows-focused and targets Python 3.13+ x86 because game DLL
 interop requires a 32-bit process.
 
+## Pre-work review requirement
+
+- Before beginning any implementation work, review `ANTIPATTERNS.md` and
+  `CHANGELOG.md`.
+- Treat `ANTIPATTERNS.md` as a hard guardrail list of repeated mistakes to
+  avoid.
+- Review `CHANGELOG.md` to maintain continuity and avoid reintroducing recently
+  fixed regressions.
+
 ## Core constraints
 
 - Python interpreter must be 32-bit and >= 3.13.
