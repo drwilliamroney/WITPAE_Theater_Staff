@@ -1190,6 +1190,30 @@ class MainWindow(QMainWindow):
             mission = str(record.get("mission", "")).strip().upper()
             if mission not in self.CV_TF_MISSIONS:
                 continue
+            start_x = self._safe_int(record.get("start_of_day_x"), 0)
+            start_y = self._safe_int(record.get("start_of_day_y"), 0)
+            end_x = self._safe_int(record.get("end_of_day_x"), 0)
+            end_y = self._safe_int(record.get("end_of_day_y"), 0)
+            if start_x < 1 or start_y < 1 or end_x < 1 or end_y < 1:
+                continue
+            target_x = self._safe_int(record.get("target_x"), 0)
+            target_y = self._safe_int(record.get("target_y"), 0)
+            target_xy = (target_x, target_y) if target_x >= 1 and target_y >= 1 else None
+            self._draw_taskforce_line(
+                layer_key,
+                (start_x, start_y),
+                (end_x, end_y),
+                target_xy,
+                color=color,
+            )
+            drawn += 1
+
+        if drawn > 0:
+            display = self.TF_MISSION_DISPLAY_NAMES.get("AIRCOMBAT", "Air Combat (CV TF)")
+            self._cv_tf_legend_entries.append((color, display))
+
+        logger.info("CV TFs overlay: side=%s drawn=%d", self._side, drawn)
+
     # Mission label → (line RGB, dot RGBA)
     LOGISTICS_TF_MISSION_STYLE: list[tuple[str, tuple[int, int, int], tuple[int, int, int, int]]] = [
         ("CARGO",         (80,  200, 255),  (80,  200, 255, 180)),
@@ -1241,15 +1265,34 @@ class MainWindow(QMainWindow):
                 (start_x, start_y),
                 (end_x, end_y),
                 target_xy,
-                color=color,
+                color=line_color,
             )
-            drawn += 1
+            end_valid = 1 <= end_x <= GAME_COLS and 1 <= end_y <= GAME_ROWS
+            if end_valid:
+                center = self._hex_center_for_game_hex(end_x, end_y)
+                if center is not None:
+                    dot_r = max(3.0, self._hex_width * 0.35)
+                    dot_item = QGraphicsEllipseItem(
+                        center.x() - dot_r,
+                        center.y() - dot_r,
+                        dot_r * 2.0,
+                        dot_r * 2.0,
+                    )
+                    dot_item.setPen(QPen(dot_border, 1.2))
+                    dot_item.setBrush(QBrush(dot_color))
+                    dot_item.setZValue(37.0)
+                    self._scene.addItem(dot_item)
+                    self._overlay_items[layer_key].append(dot_item)
+            drawn_by_mission[mission] += 1
 
-        if drawn > 0:
-            display = self.TF_MISSION_DISPLAY_NAMES.get("AIRCOMBAT", "Air Combat (CV TF)")
-            self._cv_tf_legend_entries.append((color, display))
+        # Draw a compact legend in the top-left corner of the scene.
+        self._draw_logistics_tf_legend(layer_key, mission_style, drawn_by_mission)
 
-        logger.info("CV TFs overlay: side=%s drawn=%d", self._side, drawn)
+        logger.info(
+            "Logistics TF overlay: side=%s drawn=%s",
+            self._side,
+            drawn_by_mission,
+        )
 
     def _build_other_tfs_overlay(self) -> None:
         """Build overlay lines for surface task forces (excluding CV, cargo, replenishment, tanker, sub patrol)."""
@@ -1316,54 +1359,6 @@ class MainWindow(QMainWindow):
         self._tf_legend_overlay.set_entries(entries)
         if self._map_view is not None:
             self._map_view.reposition_legend_overlay()
-
-
-            start_valid = 1 <= start_x <= GAME_COLS and 1 <= start_y <= GAME_ROWS
-            end_valid = 1 <= end_x <= GAME_COLS and 1 <= end_y <= GAME_ROWS
-
-            # Draw movement line start→end when both coordinates are known.
-            if start_valid and end_valid:
-                start_pt = self._hex_center_for_game_hex(start_x, start_y)
-                end_pt = self._hex_center_for_game_hex(end_x, end_y)
-                if start_pt is not None and end_pt is not None:
-                    pen = QPen(line_color, 1.6, Qt.SolidLine)
-                    pen.setCapStyle(Qt.RoundCap)
-                    path = QPainterPath()
-                    path.moveTo(start_pt)
-                    path.lineTo(end_pt)
-                    line_item = QGraphicsPathItem(path)
-                    line_item.setPen(pen)
-                    line_item.setZValue(36.0)
-                    self._scene.addItem(line_item)
-                    self._overlay_items[layer_key].append(line_item)
-
-            # Draw a dot at the end-of-day position (current location).
-            if end_valid:
-                center = self._hex_center_for_game_hex(end_x, end_y)
-                if center is not None:
-                    dot_r = max(3.0, self._hex_width * 0.35)
-                    dot_item = QGraphicsEllipseItem(
-                        center.x() - dot_r,
-                        center.y() - dot_r,
-                        dot_r * 2.0,
-                        dot_r * 2.0,
-                    )
-                    dot_item.setPen(QPen(dot_border, 1.2))
-                    dot_item.setBrush(QBrush(dot_color))
-                    dot_item.setZValue(37.0)
-                    self._scene.addItem(dot_item)
-                    self._overlay_items[layer_key].append(dot_item)
-
-            drawn_by_mission[mission] = drawn_by_mission.get(mission, 0) + 1
-
-        # Draw a compact legend in the top-left corner of the scene.
-        self._draw_logistics_tf_legend(layer_key, mission_style, drawn_by_mission)
-
-        logger.info(
-            "Logistics TF overlay: side=%s drawn=%s",
-            self._side,
-            drawn_by_mission,
-        )
 
     def _draw_logistics_tf_legend(
         self,
