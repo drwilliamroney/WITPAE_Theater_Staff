@@ -16,6 +16,7 @@ from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, Q
 from PyQt5.QtWidgets import (
     QAction,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDockWidget,
@@ -28,7 +29,6 @@ from PyQt5.QtWidgets import (
     QGraphicsView,
     QMainWindow,
     QProgressDialog,
-    QPushButton,
     QSplitter,
     QLabel,
     QLineEdit,
@@ -42,7 +42,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.map_assembly import MapAssembly
-from app.regions_overlay import GAME_COLS, GAME_ROWS, REGION_DEFINITIONS
+from app.regions_overlay import GAME_COLS, GAME_ROWS, REGION_DEFINITIONS, RegionDefinition
 from app.runtime_scraper import scrape_snapshot
 
 
@@ -257,9 +257,12 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        show_map_button = QPushButton("Full Map", content)
-        show_map_button.clicked.connect(self._set_initial_map_view)
-        layout.addWidget(show_map_button)
+        map_view_combo = QComboBox(content)
+        map_view_combo.addItem("Full Map")
+        for region in REGION_DEFINITIONS:
+            map_view_combo.addItem(region.name)
+        map_view_combo.currentIndexChanged.connect(self._on_map_view_selection_changed)
+        layout.addWidget(map_view_combo)
 
         common_checkboxes: list[QCheckBox] = []
         common_toggle, common_body, common_layout = self._create_overlay_section(
@@ -357,6 +360,44 @@ class MainWindow(QMainWindow):
         self._map_view.scale(scale_factor, scale_factor)
         self._map_view.horizontalScrollBar().setValue(0)
         self._map_view.verticalScrollBar().setValue(0)
+
+    def _on_map_view_selection_changed(self, index: int) -> None:
+        """Handle map view dropdown selection changes."""
+        if index == 0:
+            self._set_initial_map_view()
+        elif 1 <= index <= len(REGION_DEFINITIONS):
+            self._zoom_to_region(REGION_DEFINITIONS[index - 1])
+
+    def _zoom_to_region(self, region: RegionDefinition) -> None:
+        """Zoom the map so the region's top-left is at the canvas top-left and its width fills the canvas."""
+        if self._map_view is None or self._map_width <= 0 or self._map_height <= 0:
+            return
+
+        viewport = self._map_view.viewport()
+        viewport_width = viewport.width()
+        viewport_height = viewport.height()
+        if viewport_width <= 0:
+            return
+
+        step_x = self._map_width / (GAME_COLS - 1)
+        step_y = self._map_height / (GAME_ROWS - 1)
+
+        xs = [(hx - 1) * step_x for (hx, _hy) in region.polygon_hex]
+        ys = [(hy - 1) * step_y for (_hx, hy) in region.polygon_hex]
+        min_x = min(xs)
+        min_y = min(ys)
+        max_x = max(xs)
+        region_width = max_x - min_x
+        if region_width <= 0:
+            return
+
+        scale_factor = viewport_width / region_width
+        self._map_view.resetTransform()
+        self._map_view.scale(scale_factor, scale_factor)
+
+        center_x = min_x + viewport_width / (2.0 * scale_factor)
+        center_y = min_y + viewport_height / (2.0 * scale_factor)
+        self._map_view.centerOn(center_x, center_y)
 
     def _init_layout(self) -> None:
         map_view = MapView(self._scene, self)
