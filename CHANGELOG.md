@@ -7,6 +7,11 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added logistics overlays panel (Logistics section in left dock):
+  - **Task Forces** overlay: draws movement lines (start→end of day) for CARGO, TANKER, and REPLENISHMENT task forces in distinct colors (blue/yellow/green) with a map legend showing mission type and count.
+  - **Bases** overlay: draws base status markers color-coded by port level (gold for major, blue for large, green for medium, grey for minor) with red tint for significant damage and orange tint for critically low supply.
+- Added `_extract_bases_from_snapshots()` to `runtime_scraper.py` for in-memory base data extraction from end-of-day snapshot without writing JSON files.
+- Added in-memory `bases` dataset to `scrape_snapshot()` output for overlay consumption.
 - Added in-process legacy scraper bridge for runtime snapshot loading directly from game files in the GUI.
 - Added startup and end-turn scraper refresh hooks so overlays rebuild from current turn data.
 - Added left docked overlays explorer with grouped sections and submarine-specific layer controls.
