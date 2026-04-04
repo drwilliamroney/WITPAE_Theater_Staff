@@ -1826,7 +1826,6 @@ class MainWindow(QMainWindow):
 
         lines.extend(["", "Overlay marker counts:"])
         for layer_key in ["cv_tfs", "other_tfs", "submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
-        for layer_key in ["submarine_patrols", "submarine_threats", "invasions", "threats", "combat", "logistics_taskforces", "logistics_bases"]:
             marker_count = len(self._overlay_items.get(layer_key, []))
             is_visible = "ON" if marker_count > 0 else "OFF"
             lines.append(f"- {layer_key}: {is_visible} (markers: {marker_count})")
