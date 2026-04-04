@@ -7,6 +7,31 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Push-Location $PSScriptRoot
 
+function Invoke-GitUpdate {
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Host '[WARN] git not found in PATH — skipping repository update.'
+        return
+    }
+
+    git rev-parse --is-inside-work-tree 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '[WARN] Not inside a git repository — skipping repository update.'
+        return
+    }
+
+    Write-Host '[INFO] Fetching latest changes from remote...'
+    try {
+        git pull --ff-only
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host '[WARN] git pull --ff-only failed — continuing with existing local code.'
+            Write-Host '[WARN] (This may be due to local uncommitted changes or a non-linear history.)'
+        }
+    }
+    catch {
+        Write-Host "[WARN] git pull threw an exception — continuing with existing local code. ($_)"
+    }
+}
+
 function Test-PythonX86 {
     param([Parameter(Mandatory = $true)][string]$PythonExe)
 
@@ -123,6 +148,8 @@ function Ensure-Venv {
 try {
     $defaultSide = 'allies'
     $defaultGamePath = 'C:\Matrix Games\War in the Pacific Admiral''s Edition'
+
+    Invoke-GitUpdate
 
     $pythonExe = Resolve-Python
 
