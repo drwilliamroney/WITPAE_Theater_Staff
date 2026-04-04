@@ -57,6 +57,52 @@ def pil_image_to_qpixmap(image: Image.Image) -> QPixmap:
     return QPixmap.fromImage(qimage.copy())
 
 
+class TFLegendOverlay(QWidget):
+    """Fixed-position overlay legend widget for task force type/color mapping."""
+
+    _SWATCH_W: int = 20
+    _SWATCH_H: int = 12
+    _PAD: int = 8
+    _ROW_H: int = 22
+    _TEXT_W: int = 170
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._entries: list[tuple[QColor, str]] = []
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self.setVisible(False)
+
+    def set_entries(self, entries: list[tuple[QColor, str]]) -> None:
+        self._entries = list(entries)
+        if entries:
+            w = self._PAD * 2 + self._SWATCH_W + 6 + self._TEXT_W
+            h = self._PAD + self._ROW_H * len(entries) + self._PAD
+            self.resize(w, h)
+        self.setVisible(bool(entries))
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if not self._entries:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 175))
+        painter.setPen(QPen(QColor(200, 200, 200, 100), 1))
+        painter.drawRect(self.rect().adjusted(0, 0, -1, -1))
+        font = QFont("Segoe UI", 8)
+        painter.setFont(font)
+        y = self._PAD
+        for color, label in self._entries:
+            swatch_y = y + (self._ROW_H - self._SWATCH_H) // 2
+            painter.fillRect(self._PAD, swatch_y, self._SWATCH_W, self._SWATCH_H, color)
+            painter.setPen(QPen(QColor(255, 255, 255, 100), 1))
+            painter.drawRect(self._PAD, swatch_y, self._SWATCH_W, self._SWATCH_H)
+            painter.setPen(QColor(240, 240, 240))
+            painter.drawText(self._PAD + self._SWATCH_W + 6, y + self._ROW_H - 5, label)
+            y += self._ROW_H
+        painter.end()
+
+
 def add_tiled_map_to_scene(scene: QGraphicsScene, image: Image.Image, tile_size: int = 1024) -> tuple[int, int]:
     """Add a full-resolution map image to the scene using tiled pixmap items."""
     width, height = image.size
@@ -78,12 +124,28 @@ class MapView(QGraphicsView):
     def __init__(self, scene: QGraphicsScene, parent: QMainWindow | None = None) -> None:
         super().__init__(scene, parent)
         self._main_window = parent
+        self._legend_overlay: TFLegendOverlay | None = None
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         self.setRenderHint(QPainter.SmoothPixmapTransform, False)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setMouseTracking(True)
+
+    def set_legend_overlay(self, overlay: TFLegendOverlay) -> None:
+        self._legend_overlay = overlay
+
+    def reposition_legend_overlay(self) -> None:
+        if self._legend_overlay is None or not self._legend_overlay.isVisible():
+            return
+        margin = 10
+        x = self.width() - self._legend_overlay.width() - margin
+        y = self.height() - self._legend_overlay.height() - margin
+        self._legend_overlay.move(max(0, x), max(0, y))
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        self.reposition_legend_overlay()
 
     def wheelEvent(self, event) -> None:  # noqa: N802
         if event.modifiers() & Qt.ControlModifier:
@@ -128,7 +190,10 @@ class MainWindow(QMainWindow):
         ("combat", "Combat"),
     ]
     MODE_OVERLAY_LAYERS: dict[str, list[tuple[str, str]]] = {
-        "Surface": [],
+        "Surface": [
+            ("cv_tfs", "CV TFs"),
+            ("other_tfs", "Other TF"),
+        ],
         "Submarine": [
             ("submarine_patrols", "Patrols"),
             ("submarine_threats", "Threats"),
@@ -138,7 +203,65 @@ class MainWindow(QMainWindow):
         "Logistics": [],
     }
 
-    GAME_EXECUTABLE = "War in the Pacific Admiral Edition.exe"
+    # CV TF missions (air-combat carrier task forces).
+    CV_TF_MISSIONS: frozenset[str] = frozenset({"AIRCOMBAT"})
+
+    # Missions excluded from the "Other TF" overlay (covered by dedicated layers or not surface).
+    OTHER_TF_EXCLUDED_MISSIONS: frozenset[str] = frozenset(
+        {"AIRCOMBAT", "CARGO", "REPLENISHMENT", "TANKER", "SUBPATROL"}
+    )
+
+    # Color (R, G, B) per mission type for task force line rendering.
+    TF_MISSION_COLORS: dict[str, tuple[int, int, int]] = {
+        "AIRCOMBAT":         (255, 235,  59),
+        "SURFACE":           (220,  50,  50),
+        "BOMBARDMENT":       (255, 140,   0),
+        "FASTTRANSPORT":     (  0, 210, 210),
+        "TRANSPORT":         (100, 160, 255),
+        "MINELAYING":        (200, 190,   0),
+        "SUBMINELAYING":     (120,  40, 180),
+        "SUBTRANSPORT":      ( 60,  80, 200),
+        "AIRTRANSPORT":      ( 80, 220, 100),
+        "CVESCORT":          (200, 100, 210),
+        "AMPHIB":            (255, 100, 190),
+        "ASWCOMBAT":         (180,  60,  60),
+        "PTBOAT":            (  0, 190, 160),
+        "MINESWEEPING":      (180, 180, 180),
+        "LANDINGCRAFT":      (210, 150,  80),
+        "SUPPORT":           (160, 180, 210),
+        "LOCALMINESWEEPING": (200, 220,  50),
+        "ESCORT":            (255, 170, 100),
+    }
+
+    # Human-readable display names for legend labels.
+    TF_MISSION_DISPLAY_NAMES: dict[str, str] = {
+        "AIRCOMBAT":         "Air Combat (CV TF)",
+        "SURFACE":           "Surface",
+        "BOMBARDMENT":       "Bombardment",
+        "FASTTRANSPORT":     "Fast Transport",
+        "TRANSPORT":         "Transport",
+        "MINELAYING":        "Mine Laying",
+        "SUBMINELAYING":     "Sub Mine Laying",
+        "SUBTRANSPORT":      "Sub Transport",
+        "AIRTRANSPORT":      "Air Transport",
+        "CVESCORT":          "CV Escort",
+        "AMPHIB":            "Amphibious",
+        "ASWCOMBAT":         "ASW Combat",
+        "PTBOAT":            "PT Boat",
+        "MINESWEEPING":      "Mine Sweeping",
+        "LANDINGCRAFT":      "Landing Craft",
+        "SUPPORT":           "Support",
+        "LOCALMINESWEEPING": "Local Mine Sweeping",
+        "ESCORT":            "Escort",
+    }
+
+    # Arrow geometry constants for task force movement lines.
+    # ARROW_SIZE_RATIO: fraction of line length used for arrowhead wings (clamped).
+    # ARROW_WING_ANGLE_DEG: half-angle of the arrowhead spread in degrees.
+    TF_ARROW_SIZE_RATIO: float = 0.18
+    TF_ARROW_SIZE_MIN_PX: float = 6.0
+    TF_ARROW_SIZE_MAX_PX: float = 16.0
+    TF_ARROW_WING_ANGLE_DEG: float = 28.0
     GAME_START_ARGS = [
         "-altFont",
         "-skipVideo",
@@ -187,11 +310,16 @@ class MainWindow(QMainWindow):
             "invasions": False,
             "threats": False,
             "combat": False,
+            "cv_tfs": False,
+            "other_tfs": False,
             "submarine_patrols": False,
             "submarine_threats": False,
         }
         self._map_view: MapView | None = None
         self._detail_panel: QTextEdit | None = None
+        self._tf_legend_overlay: TFLegendOverlay | None = None
+        self._cv_tf_legend_entries: list[tuple[QColor, str]] = []
+        self._other_tf_legend_entries: list[tuple[QColor, str]] = []
         self._map_width = 0
         self._map_height = 0
         self._hex_size_x = 0.0
@@ -207,6 +335,8 @@ class MainWindow(QMainWindow):
             "invasions": [],
             "threats": [],
             "combat": [],
+            "cv_tfs": [],
+            "other_tfs": [],
             "submarine_patrols": [],
             "submarine_threats": [],
         }
@@ -342,6 +472,8 @@ class MainWindow(QMainWindow):
         self._overlay_layer_visibility[layer_key] = bool(visible)
         for item in self._overlay_items.get(layer_key, []):
             item.setVisible(bool(visible))
+        if layer_key in {"cv_tfs", "other_tfs"}:
+            self._update_tf_legend()
         self._refresh_detail_panel()
 
     def _set_initial_map_view(self) -> None:
@@ -365,6 +497,10 @@ class MainWindow(QMainWindow):
         self._map_view = map_view
         self._detail_panel = detail_panel
 
+        legend_overlay = TFLegendOverlay(map_view)
+        self._tf_legend_overlay = legend_overlay
+        map_view.set_legend_overlay(legend_overlay)
+
         splitter = QSplitter(self)
         splitter.addWidget(map_view)
         splitter.addWidget(detail_panel)
@@ -387,10 +523,13 @@ class MainWindow(QMainWindow):
         self._build_invasions_overlay()
         self._build_threats_overlay()
         self._build_combat_overlay()
+        self._build_cv_tfs_overlay()
+        self._build_other_tfs_overlay()
         self._set_regions_visible(self._regions_visible)
         self._set_hex_grid_visible(self._hex_grid_visible)
         for layer_key in self._overlay_items:
             self._set_overlay_layer_visible(layer_key, self._overlay_layer_visibility.get(layer_key, False))
+        self._update_tf_legend()
         self._selected_hex_item = None
         self._selected_hex = None
 
@@ -915,6 +1054,181 @@ class MainWindow(QMainWindow):
                 z_value=35.0,
             )
 
+    def _draw_taskforce_line(
+        self,
+        layer_key: str,
+        start_xy: tuple[int, int],
+        end_xy: tuple[int, int],
+        target_xy: tuple[int, int] | None,
+        *,
+        color: QColor,
+        width: float = 1.8,
+        z_value: float = 36.0,
+    ) -> None:
+        """Draw a movement line for a task force (start→end solid, end→target dashed)."""
+        start_center = self._hex_center_for_game_hex(start_xy[0], start_xy[1])
+        end_center = self._hex_center_for_game_hex(end_xy[0], end_xy[1])
+        if start_center is None or end_center is None:
+            return
+
+        # Build the solid movement line with arrowhead (start → end).
+        path = QPainterPath()
+        path.moveTo(start_center)
+        path.lineTo(end_center)
+
+        dx = end_center.x() - start_center.x()
+        dy = end_center.y() - start_center.y()
+        length = math.hypot(dx, dy)
+        if length > 1e-3:
+            angle = math.atan2(dy, dx)
+            arrow_size = max(
+                self.TF_ARROW_SIZE_MIN_PX,
+                min(self.TF_ARROW_SIZE_MAX_PX, length * self.TF_ARROW_SIZE_RATIO),
+            )
+            wing_angle = math.radians(self.TF_ARROW_WING_ANGLE_DEG)
+            path.moveTo(end_center)
+            path.lineTo(QPointF(
+                end_center.x() - arrow_size * math.cos(angle - wing_angle),
+                end_center.y() - arrow_size * math.sin(angle - wing_angle),
+            ))
+            path.moveTo(end_center)
+            path.lineTo(QPointF(
+                end_center.x() - arrow_size * math.cos(angle + wing_angle),
+                end_center.y() - arrow_size * math.sin(angle + wing_angle),
+            ))
+
+        line_item = QGraphicsPathItem(path)
+        pen = QPen(color, width)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        line_item.setPen(pen)
+        line_item.setBrush(QBrush(Qt.NoBrush))
+        line_item.setZValue(z_value)
+        self._scene.addItem(line_item)
+        self._overlay_items[layer_key].append(line_item)
+
+        # Dashed line from end position to target destination (if different).
+        if target_xy is not None and target_xy != end_xy:
+            target_center = self._hex_center_for_game_hex(target_xy[0], target_xy[1])
+            if target_center is not None:
+                target_path = QPainterPath()
+                target_path.moveTo(end_center)
+                target_path.lineTo(target_center)
+                target_item = QGraphicsPathItem(target_path)
+                dash_pen = QPen(color, width * 0.75)
+                dash_pen.setStyle(Qt.DashLine)
+                dash_pen.setCapStyle(Qt.RoundCap)
+                target_item.setPen(dash_pen)
+                target_item.setBrush(QBrush(Qt.NoBrush))
+                target_item.setZValue(z_value - 0.5)
+                self._scene.addItem(target_item)
+                self._overlay_items[layer_key].append(target_item)
+
+    def _build_cv_tfs_overlay(self) -> None:
+        """Build overlay lines for CV (air-combat) task forces."""
+        layer_key = "cv_tfs"
+        self._overlay_items[layer_key].clear()
+        self._cv_tf_legend_entries.clear()
+
+        taskforce_records = self._get_scraper_records("taskforces")
+        color_rgb = self.TF_MISSION_COLORS.get("AIRCOMBAT", (255, 235, 59))
+        color = QColor(*color_rgb, 220)
+        drawn = 0
+
+        for record in taskforce_records:
+            mission = str(record.get("mission", "")).strip().upper()
+            if mission not in self.CV_TF_MISSIONS:
+                continue
+            start_x = self._safe_int(record.get("start_of_day_x"), 0)
+            start_y = self._safe_int(record.get("start_of_day_y"), 0)
+            end_x = self._safe_int(record.get("end_of_day_x"), 0)
+            end_y = self._safe_int(record.get("end_of_day_y"), 0)
+            if start_x < 1 or start_y < 1 or end_x < 1 or end_y < 1:
+                continue
+            target_x = self._safe_int(record.get("target_x"), 0)
+            target_y = self._safe_int(record.get("target_y"), 0)
+            target_xy = (target_x, target_y) if target_x >= 1 and target_y >= 1 else None
+            self._draw_taskforce_line(
+                layer_key,
+                (start_x, start_y),
+                (end_x, end_y),
+                target_xy,
+                color=color,
+            )
+            drawn += 1
+
+        if drawn > 0:
+            display = self.TF_MISSION_DISPLAY_NAMES.get("AIRCOMBAT", "Air Combat (CV TF)")
+            self._cv_tf_legend_entries.append((color, display))
+
+        logger.info("CV TFs overlay: side=%s drawn=%d", self._side, drawn)
+
+    def _build_other_tfs_overlay(self) -> None:
+        """Build overlay lines for surface task forces (excluding CV, cargo, replenishment, tanker, sub patrol)."""
+        layer_key = "other_tfs"
+        self._overlay_items[layer_key].clear()
+        self._other_tf_legend_entries.clear()
+
+        taskforce_records = self._get_scraper_records("taskforces")
+        mission_colors: dict[str, QColor] = {}
+
+        for record in taskforce_records:
+            mission = str(record.get("mission", "")).strip().upper()
+            if mission in self.OTHER_TF_EXCLUDED_MISSIONS:
+                continue
+            start_x = self._safe_int(record.get("start_of_day_x"), 0)
+            start_y = self._safe_int(record.get("start_of_day_y"), 0)
+            end_x = self._safe_int(record.get("end_of_day_x"), 0)
+            end_y = self._safe_int(record.get("end_of_day_y"), 0)
+            if start_x < 1 or start_y < 1 or end_x < 1 or end_y < 1:
+                continue
+            color_rgb = self.TF_MISSION_COLORS.get(mission, (180, 180, 180))
+            color = QColor(*color_rgb, 220)
+            if mission not in mission_colors:
+                mission_colors[mission] = color
+            target_x = self._safe_int(record.get("target_x"), 0)
+            target_y = self._safe_int(record.get("target_y"), 0)
+            target_xy = (target_x, target_y) if target_x >= 1 and target_y >= 1 else None
+            self._draw_taskforce_line(
+                layer_key,
+                (start_x, start_y),
+                (end_x, end_y),
+                target_xy,
+                color=color,
+            )
+
+        for mission, color in sorted(mission_colors.items()):
+            if mission in self.TF_MISSION_DISPLAY_NAMES:
+                display = self.TF_MISSION_DISPLAY_NAMES[mission]
+            else:
+                display = mission.replace("_", " ").title()
+                logger.warning(
+                    "Other TFs overlay: no display name for mission type %r; using fallback %r",
+                    mission,
+                    display,
+                )
+            self._other_tf_legend_entries.append((color, display))
+
+        logger.info(
+            "Other TFs overlay: side=%s drawn=%d missions=%s",
+            self._side,
+            len(self._overlay_items[layer_key]),
+            sorted(mission_colors.keys()),
+        )
+
+    def _update_tf_legend(self) -> None:
+        """Rebuild legend content based on currently visible surface TF overlay layers."""
+        if self._tf_legend_overlay is None:
+            return
+        entries: list[tuple[QColor, str]] = []
+        if self._overlay_layer_visibility.get("cv_tfs", False):
+            entries.extend(self._cv_tf_legend_entries)
+        if self._overlay_layer_visibility.get("other_tfs", False):
+            entries.extend(self._other_tf_legend_entries)
+        self._tf_legend_overlay.set_entries(entries)
+        if self._map_view is not None:
+            self._map_view.reposition_legend_overlay()
+
     def _row_offset(self, row_zero: int) -> float:
         if self.SHIFT_EVEN_ROWS_RIGHT:
             return 0.5 if (row_zero % 2 == 0) else 0.0
@@ -1212,7 +1526,7 @@ class MainWindow(QMainWindow):
                 lines.append(f"- {file_name}: missing")
 
         lines.extend(["", "Overlay marker counts:"])
-        for layer_key in ["submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
+        for layer_key in ["cv_tfs", "other_tfs", "submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
             marker_count = len(self._overlay_items.get(layer_key, []))
             is_visible = "ON" if marker_count > 0 else "OFF"
             lines.append(f"- {layer_key}: {is_visible} (markers: {marker_count})")

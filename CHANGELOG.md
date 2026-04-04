@@ -7,6 +7,10 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added CV TFs and Other TF surface overlay checkboxes to the Surface mode section of the overlays dock.
+- CV TFs overlay draws movement lines (start-of-day to end-of-day with arrowhead, dashed line to target destination) for all AIRCOMBAT-mission task forces.
+- Other TF overlay draws per-type colored movement lines for all task forces excluding air-combat, cargo, replenishment, tanker, and sub-patrol missions.
+- Added lower-right map legend overlay that appears when CV TFs or Other TF layers are enabled, showing a color swatch and label for each mission type present in the loaded data.
 - Added in-process legacy scraper bridge for runtime snapshot loading directly from game files in the GUI.
 - Added startup and end-turn scraper refresh hooks so overlays rebuild from current turn data.
 - Added left docked overlays explorer with grouped sections and submarine-specific layer controls.
