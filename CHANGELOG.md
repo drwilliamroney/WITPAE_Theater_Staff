@@ -16,6 +16,7 @@ The format is based on Keep a Changelog.
 - Added startup and end-turn scraper refresh hooks so overlays rebuild from current turn data.
 - Added left docked overlays explorer with grouped sections and submarine-specific layer controls.
 - Added editable startup game launch dialog in the desktop app shell.
+- Added map view dropdown replacing the "Full Map" button; top item is Full Map (default), followed by each named region; selecting a region zooms the canvas so the region fills the viewport width with its top-left anchored at the canvas top-left.
 
 ### Changed
 - Changed startup map behavior to fit to full map width after layout initialization.
