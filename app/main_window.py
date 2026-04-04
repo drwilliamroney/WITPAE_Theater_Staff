@@ -271,6 +271,7 @@ class MainWindow(QMainWindow):
     TF_ARROW_SIZE_MIN_PX: float = 6.0
     TF_ARROW_SIZE_MAX_PX: float = 16.0
     TF_ARROW_WING_ANGLE_DEG: float = 28.0
+    GAME_EXECUTABLE: str = "witpae.exe"
     GAME_START_ARGS = [
         "-altFont",
         "-skipVideo",
@@ -1409,7 +1410,7 @@ class MainWindow(QMainWindow):
             sorted(mission_colors.keys()),
         )
 
-
+    def _update_tf_legend(self) -> None:
         """Rebuild legend content based on currently visible surface TF overlay layers."""
         if self._tf_legend_overlay is None:
             return
