@@ -200,7 +200,9 @@ class MainWindow(QMainWindow):
             ("submarine_threats", "Threats"),
         ],
         "Air": [],
-        "Ground": [],
+        "Ground": [
+            ("transport_tfs", "Transport TF"),
+        ],
         "Logistics": [
             ("logistics_taskforces", "Task Forces"),
             ("logistics_bases", "Bases"),
@@ -212,8 +214,11 @@ class MainWindow(QMainWindow):
 
     # Missions excluded from the "Other TF" overlay (covered by dedicated layers or not surface).
     OTHER_TF_EXCLUDED_MISSIONS: frozenset[str] = frozenset(
-        {"AIRCOMBAT", "CARGO", "REPLENISHMENT", "TANKER", "SUBPATROL"}
+        {"AIRCOMBAT", "CARGO", "REPLENISHMENT", "TANKER", "SUBPATROL", "TRANSPORT", "FASTTRANSPORT", "AMPHIB"}
     )
+
+    # Missions included in the Transport TF overlay (moved out of Other TF, listed under Ground).
+    TRANSPORT_TF_MISSIONS: frozenset[str] = frozenset({"TRANSPORT", "FASTTRANSPORT", "AMPHIB"})
 
     # Color (R, G, B) per mission type for task force line rendering.
     TF_MISSION_COLORS: dict[str, tuple[int, int, int]] = {
@@ -316,6 +321,7 @@ class MainWindow(QMainWindow):
             "combat": False,
             "cv_tfs": False,
             "other_tfs": False,
+            "transport_tfs": False,
             "submarine_patrols": False,
             "submarine_threats": False,
             "logistics_taskforces": False,
@@ -326,6 +332,7 @@ class MainWindow(QMainWindow):
         self._tf_legend_overlay: TFLegendOverlay | None = None
         self._cv_tf_legend_entries: list[tuple[QColor, str]] = []
         self._other_tf_legend_entries: list[tuple[QColor, str]] = []
+        self._transport_tf_legend_entries: list[tuple[QColor, str]] = []
         self._map_width = 0
         self._map_height = 0
         self._hex_size_x = 0.0
@@ -343,6 +350,7 @@ class MainWindow(QMainWindow):
             "combat": [],
             "cv_tfs": [],
             "other_tfs": [],
+            "transport_tfs": [],
             "submarine_patrols": [],
             "submarine_threats": [],
             "logistics_taskforces": [],
@@ -483,7 +491,7 @@ class MainWindow(QMainWindow):
         self._overlay_layer_visibility[layer_key] = bool(visible)
         for item in self._overlay_items.get(layer_key, []):
             item.setVisible(bool(visible))
-        if layer_key in {"cv_tfs", "other_tfs"}:
+        if layer_key in {"cv_tfs", "other_tfs", "transport_tfs"}:
             self._update_tf_legend()
         self._refresh_detail_panel()
 
@@ -574,6 +582,7 @@ class MainWindow(QMainWindow):
         self._build_combat_overlay()
         self._build_cv_tfs_overlay()
         self._build_other_tfs_overlay()
+        self._build_transport_tfs_overlay()
         self._build_logistics_taskforces_overlay()
         self._build_base_status_overlay()
         self._set_regions_visible(self._regions_visible)
@@ -1347,7 +1356,60 @@ class MainWindow(QMainWindow):
             sorted(mission_colors.keys()),
         )
 
-    def _update_tf_legend(self) -> None:
+    def _build_transport_tfs_overlay(self) -> None:
+        """Build overlay lines for transport and amphibious task forces (Transport TF under Ground)."""
+        layer_key = "transport_tfs"
+        self._overlay_items[layer_key].clear()
+        self._transport_tf_legend_entries.clear()
+
+        taskforce_records = self._get_scraper_records("taskforces")
+        mission_colors: dict[str, QColor] = {}
+
+        for record in taskforce_records:
+            mission = str(record.get("mission", "")).strip().upper()
+            if mission not in self.TRANSPORT_TF_MISSIONS:
+                continue
+            start_x = self._safe_int(record.get("start_of_day_x"), 0)
+            start_y = self._safe_int(record.get("start_of_day_y"), 0)
+            end_x = self._safe_int(record.get("end_of_day_x"), 0)
+            end_y = self._safe_int(record.get("end_of_day_y"), 0)
+            if start_x < 1 or start_y < 1 or end_x < 1 or end_y < 1:
+                continue
+            color_rgb = self.TF_MISSION_COLORS.get(mission, (180, 180, 180))
+            color = QColor(*color_rgb, 220)
+            if mission not in mission_colors:
+                mission_colors[mission] = color
+            target_x = self._safe_int(record.get("target_x"), 0)
+            target_y = self._safe_int(record.get("target_y"), 0)
+            target_xy = (target_x, target_y) if target_x >= 1 and target_y >= 1 else None
+            self._draw_taskforce_line(
+                layer_key,
+                (start_x, start_y),
+                (end_x, end_y),
+                target_xy,
+                color=color,
+            )
+
+        for mission, color in sorted(mission_colors.items()):
+            if mission in self.TF_MISSION_DISPLAY_NAMES:
+                display = self.TF_MISSION_DISPLAY_NAMES[mission]
+            else:
+                display = mission.replace("_", " ").title()
+                logger.warning(
+                    "Transport TFs overlay: no display name for mission type %r; using fallback %r",
+                    mission,
+                    display,
+                )
+            self._transport_tf_legend_entries.append((color, display))
+
+        logger.info(
+            "Transport TFs overlay: side=%s drawn=%d missions=%s",
+            self._side,
+            len(self._overlay_items[layer_key]),
+            sorted(mission_colors.keys()),
+        )
+
+
         """Rebuild legend content based on currently visible surface TF overlay layers."""
         if self._tf_legend_overlay is None:
             return
@@ -1356,6 +1418,8 @@ class MainWindow(QMainWindow):
             entries.extend(self._cv_tf_legend_entries)
         if self._overlay_layer_visibility.get("other_tfs", False):
             entries.extend(self._other_tf_legend_entries)
+        if self._overlay_layer_visibility.get("transport_tfs", False):
+            entries.extend(self._transport_tf_legend_entries)
         self._tf_legend_overlay.set_entries(entries)
         if self._map_view is not None:
             self._map_view.reposition_legend_overlay()
@@ -1820,7 +1884,7 @@ class MainWindow(QMainWindow):
                 lines.append(f"- {file_name}: missing")
 
         lines.extend(["", "Overlay marker counts:"])
-        for layer_key in ["cv_tfs", "other_tfs", "submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
+        for layer_key in ["cv_tfs", "other_tfs", "transport_tfs", "submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
             marker_count = len(self._overlay_items.get(layer_key, []))
             is_visible = "ON" if marker_count > 0 else "OFF"
             lines.append(f"- {layer_key}: {is_visible} (markers: {marker_count})")
