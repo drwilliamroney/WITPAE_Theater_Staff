@@ -7,7 +7,11 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added **Transport TF** overlay under the Ground section of the overlays dock, showing movement lines for TRANSPORT, FASTTRANSPORT, and AMPHIB mission task forces.
 - `run_ui.bat` and `run_ui.ps1` now perform a `git pull` at startup to fetch the latest code before launching; if git is unavailable or the pull fails the scripts warn and continue with the existing local code.
+
+### Changed
+- Removed TRANSPORT, FASTTRANSPORT, and AMPHIB missions from the **Other TF** overlay (Surface section); they now appear exclusively in the new **Transport TF** overlay under Ground.
 
 ### Fixed
 - Fixed startup `NameError: name 'color' is not defined` crash in `_build_logistics_taskforces_overlay` — the call to `_draw_taskforce_line` now correctly passes `color=line_color`.
