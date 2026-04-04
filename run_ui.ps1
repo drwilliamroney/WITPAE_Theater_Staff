@@ -106,13 +106,13 @@ function Ensure-Venv {
     }
 
     Write-Host '[INFO] Installing dependencies...'
-    & $venvPython -m pip install --upgrade pip
+    & $venvPython -m pip install --upgrade pip | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to upgrade pip.' }
 
-    & $venvPython -m pip install -r (Join-Path $PSScriptRoot 'requirements.txt')
+    & $venvPython -m pip install -r (Join-Path $PSScriptRoot 'requirements.txt') | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Failed to install dependencies.' }
 
-    & $venvPython -c "import PyQt5, PIL, rich" 2>$null
+    & $venvPython -c "import PyQt5, PIL, rich" 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw 'Python dependencies are not importable. WITPAE Theater Staff currently requires Python 3.13 x86 for PyQt5. Remove .venv and re-run with Python 3.13-32.'
     }

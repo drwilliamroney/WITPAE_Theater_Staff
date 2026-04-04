@@ -12,6 +12,11 @@ interop requires a 32-bit process.
 - `pwsdll.dll` and `pwsdll7.dll` must exist in the configured game directory.
 - UI is currently map-first (base map and shell), with overlays introduced in
   incremental stages.
+- Scraper-derived runtime data is in-memory only.
+- Do not reintroduce JSON files, JSON dataset naming, or any disk-based fallback
+  for overlay/runtime data when borrowing logic from legacy repos.
+- If in-memory scraper data is missing, fail loudly or log that the snapshot is
+  missing; do not silently fall back to JSON or placeholder data.
 
 ## Code style and architecture
 
@@ -46,9 +51,32 @@ interop requires a 32-bit process.
 - Prioritize tests for non-UI logic (`map_assembly`, coordinate transforms,
   argument parsing, and data helpers).
 - Keep UI tests lightweight and focused on startup smoke behavior where needed.
+- Before stating that implementation work is complete, run a startup smoke check
+  via `run_ui.bat` or `run_ui.ps1` and verify the app does not exit with a
+  compile/import/syntax startup error.
+- If startup smoke check cannot be run in the current environment, explicitly
+  report that limitation and do not claim full completion.
 
 ## Migration guidance
 
 - Do not reintroduce .NET, WPF, solution files, or C# build scripts.
 - Keep startup scripts (`run_ui.bat`, `run_ui.ps1`) as the canonical launch
   entry points for users.
+
+## UI stability guardrails (do not regress)
+
+- Preserve overlay controls as a left docked explorer-style panel in
+  `app/main_window.py` (QDockWidget with grouped checkboxes).
+- Do not move overlay visibility controls to the top toolbar unless the user
+  explicitly asks for that change.
+- Keep startup defaults for the overlay panel as:
+  - Common section expanded.
+  - `Regions` checked.
+  - `HexGrid` checked.
+  - Mode sections (for example Submarine) collapsed by default.
+- Preserve grouped overlay structure:
+  - Common: `hexgrid`, `regions`, `invasions`, `threats`, `combat`.
+  - Submarine: `submarine_patrols`, `submarine_threats`.
+- When editing UI code, do not remove `_init_overlays_dock`,
+  `_create_overlay_section`, or `_set_overlay_layer_visible` unless explicitly
+  instructed by the user.

@@ -45,8 +45,171 @@ available for this project target yet.
 - Main window title: `WITPAE Theater Staff`
 - Base map assembled from `ART\WPEN00.bmp` to `ART\WPEN41.bmp`
 - Placeholder map fallback when tiles are missing
-- Regions overlay from pywitpaeui theater boundaries with toolbar toggle
-- HexGrid overlay (interconnected hex-cell grid) with toolbar toggle
+- Top bar runtime metadata sourced from scraper `SAVE/<SIDE>/turn.json`:
+  scenario name, game date, and turn number
+- Collapsible overlays panel with grouped layers:
+  - Common
+  - Logistics
+  - Combat
+  - Sea
+  - Air
+  - Land
+- Full map reset button in the overlays panel
+- Overlay layers are rebuilt automatically after turn processing and respect
+  user toggle visibility state
+
+## Overlay Capabilities (Current)
+
+The overlays are now driven from pywitpaeui/pywitpaescraper-style JSON outputs
+under `SAVE/ALLIED` or `SAVE/JAPAN`.
+
+### Common layers
+
+- `Regions`
+  - Source: static theater region definitions (`app/regions_overlay.py`)
+  - Shows: named theater boundaries
+
+- `HexGrid`
+  - Source: calibrated map constants (`app/main_window.py`)
+  - Shows: full map hex lattice aligned to game coordinates
+
+- `Task Forces`
+  - Source: `taskforces.json`
+  - Fields used: `start_of_day_x`, `start_of_day_y`, `end_of_day_x`,
+    `end_of_day_y`, `target_x`, `target_y`, `mission`, `flagship_name`
+  - Shows: movement path start -> end and end -> target for non-logistics,
+    non-subpatrol task forces
+
+- `Subpatrols`
+  - Source: `taskforces.json`
+  - Fields used: `mission`, `target_x`, `target_y`
+  - Shows: 2-hex patrol circles for `SUBPATROL` task forces
+
+- `Invasions`
+  - Sources:
+    - `SAVE/combatreport.txt`
+    - `threats.json` (`invasion_threat_areas`)
+  - Shows: invasion markers (deduplicated by hex center)
+
+- `Threats`
+  - Source: `threats.json`
+  - Fields used:
+    - subtype arrays: `sub_threat_areas`, `surface_threat_areas`,
+      `carrier_threat_areas`
+    - fallback: `threat_areas[*].threat_types`
+    - positions: `position.x`, `position.y`
+    - optional radius override: `display_radius_hexes`
+  - Shows: subtype threat circles plus general threat-area points
+
+### Logistics layers
+
+- `Base Supply`
+  - Source: `bases.json`
+  - Fields used: `x`, `y`, `supply`, `supply_needed|supplyNeeded`,
+    `fuel`, `fuel_needed|fuelRequested`
+  - Shows: supply-state circles (healthy/strained/low)
+
+- `Logistics Taskforces`
+  - Source: `taskforces.json`
+  - Fields used: `mission`, `end_of_day_x`, `end_of_day_y`,
+    `target_x`, `target_y`
+  - Shows: logistics route lines for `CARGO` and `TANKER`
+
+### Combat layers
+
+- `Major Actions`
+  - Source: `threats.json` (`invasion_threat_areas`)
+  - Shows: major combat action markers derived from invasion-threat areas
+
+- `Loss Summaries`
+  - Source: `threats.json` (`threat_areas`)
+  - Fields used: `position.x`, `position.y`, `threat_score`
+  - Shows: severity markers for elevated threat-score areas
+
+### Sea layers
+
+- `HQ Coverage`
+  - Source: `ground_units.json`
+  - Fields used: `unit_type_name`, `hq_kind`, `end_of_day_x`, `end_of_day_y`
+  - Shows: command-radius circles for `naval` and `theater` HQ kinds
+
+- `Unit-HQ Links`
+  - Sources: `ships.json`, `bases.json`, `ground_units.json`
+  - Fields used: `x`, `y`, `local_fleet_hq_source_unit_id`, `attached_hq_id`
+  - Shows: dashed ship-to-HQ linkage lines when resolvable
+
+- `Task Force Vectors`
+  - Source: `taskforces.json`
+  - Fields used: `mission`, `end_of_day_x`, `end_of_day_y`,
+    `target_x`, `target_y`
+  - Shows: operational TF vector lines (non-logistics)
+
+- `Minefields`
+  - Source: `minefields.json`
+  - Fields used: `x`, `y`, `mine_count`, `side`
+  - Shows: friendly minefield intensity circles
+
+### Air layers
+
+- `HQ Coverage`
+  - Source: `ground_units.json`
+  - Fields used: `unit_type_name`, `hq_kind`, `end_of_day_x`, `end_of_day_y`
+  - Shows: command-radius circles for `air` and `theater` HQ kinds
+
+- `Air Search`
+  - Source: `airgroups.json`
+  - Fields used: `x`, `y`, `aircraft_range`, `percent_search`,
+    `search_arc_start`, `search_arc_end`
+  - Shows: search mission sector wedges
+
+- `Air ASW`
+  - Source: `airgroups.json`
+  - Fields used: `x`, `y`, `aircraft_range`, `percent_asw`,
+    `asw_arc_start`, `asw_arc_end`
+  - Shows: ASW mission sector wedges
+
+- `Air Attack Range`
+  - Source: `airgroups.json`
+  - Fields used: `x`, `y`, `aircraft_range`, allocation percentages
+  - Shows: dashed attack-radius circles for strike-capable groups
+
+- `Air HQ Links`
+  - Sources: `airgroups.json`, `bases.json`, `ground_units.json`
+  - Fields used: `x`, `y`, `assigned_hq_id`, `local_air_hq_source_unit_id`,
+    `attached_hq_id`
+  - Shows: dashed airgroup-to-HQ linkage lines when resolvable
+
+### Land layers
+
+- `HQ Coverage`
+  - Source: `ground_units.json`
+  - Fields used: `unit_type_name`, `hq_kind`, `end_of_day_x`, `end_of_day_y`
+  - Shows: command-radius circles for `corp`, `army`, and `theater` HQ kinds
+
+- `Area Command`
+  - Source: `ground_units.json`
+  - Fields used: `area_command`, `end_of_day_x`, `end_of_day_y`
+  - Shows: grouped area polygons using convex hull with bbox fallback
+
+- `Ground Unit-HQ Links`
+  - Sources: `ground_units.json`, `bases.json`
+  - Fields used: `end_of_day_x`, `end_of_day_y`, `effective_hq_id`,
+    `attached_hq_id`, `base_chain_hq_id`
+  - Shows: unit-to-HQ linkage lines for ground formations
+
+- `Planning`
+  - Source: `ground_units.json`
+  - Fields used: `end_of_day_x`, `end_of_day_y`, `prep_target_x`,
+    `prep_target_y`
+  - Shows: dashed planning lines from unit position to prep target
+
+## Overlay Notes
+
+- Several overlays are geometric approximations of pywitpaeui web rendering,
+  adapted for direct `QGraphicsScene` drawing.
+- Visual parity tuning (styles, thresholds, mission filters, and some
+  semantics) should be finalized during runtime verification against known
+  saves.
 
 ## Map and Hex Calibration
 

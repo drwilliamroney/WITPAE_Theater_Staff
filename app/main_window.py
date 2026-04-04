@@ -7,6 +7,7 @@ import math
 import logging
 import subprocess
 import shlex
+import re
 from pathlib import Path
 
 from PIL import Image
@@ -14,8 +15,11 @@ from PyQt5.QtCore import QPointF, QTimer, Qt
 from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt5.QtWidgets import (
     QAction,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
+    QDockWidget,
+    QGraphicsEllipseItem,
     QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsPixmapItem,
@@ -24,18 +28,22 @@ from PyQt5.QtWidgets import (
     QGraphicsView,
     QMainWindow,
     QProgressDialog,
+    QPushButton,
     QSplitter,
     QLabel,
     QLineEdit,
     QTextEdit,
     QToolBar,
+    QToolButton,
     QToolTip,
     QMessageBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from app.map_assembly import MapAssembly
 from app.regions_overlay import GAME_COLS, GAME_ROWS, REGION_DEFINITIONS
+from app.runtime_scraper import scrape_snapshot
 
 
 logger = logging.getLogger(__name__)
@@ -106,6 +114,30 @@ class MapView(QGraphicsView):
 class MainWindow(QMainWindow):
     """Main UI shell for map display (overlays intentionally omitted)."""
 
+    HEX_COORDINATE_PATTERN = re.compile(r"\((?P<x>\d{1,3})\s*,\s*(?P<y>\d{1,3})\)")
+    HEX_COORDINATE_AT_PATTERN = re.compile(r"\bat\s+(?P<x>\d{1,3})\s*,\s*(?P<y>\d{1,3})\b", re.IGNORECASE)
+    SUB_WORD_PATTERN = re.compile(r"\bsub\b")
+    ALLIED_TEXT_LOG_NAMES = frozenset({"combatreport.txt", "operationsreport.txt", "sigintreport.txt"})
+    JAPAN_TEXT_LOG_NAMES = frozenset({"jcombatreport.txt", "joperationsreport.txt", "jsigintreport.txt"})
+
+    COMMON_OVERLAY_LAYERS: list[tuple[str, str]] = [
+        ("hexgrid", "HexGrid"),
+        ("regions", "Regions"),
+        ("invasions", "Invasions"),
+        ("threats", "Threats"),
+        ("combat", "Combat"),
+    ]
+    MODE_OVERLAY_LAYERS: dict[str, list[tuple[str, str]]] = {
+        "Surface": [],
+        "Submarine": [
+            ("submarine_patrols", "Patrols"),
+            ("submarine_threats", "Threats"),
+        ],
+        "Air": [],
+        "Ground": [],
+        "Logistics": [],
+    }
+
     GAME_EXECUTABLE = "War in the Pacific Admiral Edition.exe"
     GAME_START_ARGS = [
         "-altFont",
@@ -137,16 +169,27 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._game_dir = game_dir
         self._save_path = save_path
-        self._side = side
+        side_token = str(side or "").strip().upper()
+        self._side = "JAPAN" if side_token.startswith("JAP") else "ALLIED"
         self._show_mouse_pixel_debug = True
         self._scene = QGraphicsScene(self)
         self._regions_visible = True
         self._region_items: list[object] = []
-        self._hex_grid_visible = False
+        self._hex_grid_visible = True
         self._hex_grid_items: list[object] = []
         self._selected_hex_item: QGraphicsPolygonItem | None = None
-        self._regions_action: QAction | None = None
-        self._hex_grid_action: QAction | None = None
+        self._overlays_dock: QDockWidget | None = None
+        self._regions_checkbox: QCheckBox | None = None
+        self._hex_grid_checkbox: QCheckBox | None = None
+        self._overlay_layer_visibility: dict[str, bool] = {
+            "hexgrid": self._hex_grid_visible,
+            "regions": self._regions_visible,
+            "invasions": False,
+            "threats": False,
+            "combat": False,
+            "submarine_patrols": False,
+            "submarine_threats": False,
+        }
         self._map_view: MapView | None = None
         self._detail_panel: QTextEdit | None = None
         self._map_width = 0
@@ -158,6 +201,15 @@ class MainWindow(QMainWindow):
         self._hex_origin_y = 0.0
         self._hover_hex: tuple[int, int] | None = None
         self._selected_hex: tuple[int, int] | None = None
+        self._scraper_records_cache: dict[str, list[dict]] = {}
+        self._scraper_object_cache: dict[str, dict] = {}
+        self._overlay_items: dict[str, list[object]] = {
+            "invasions": [],
+            "threats": [],
+            "combat": [],
+            "submarine_patrols": [],
+            "submarine_threats": [],
+        }
 
         self._turn_progress_dialog: QProgressDialog | None = None
         self._turn_activity_deadline = 0.0
@@ -177,7 +229,9 @@ class MainWindow(QMainWindow):
         self.resize(1400, 900)
 
         self._init_toolbar()
+        self._init_overlays_dock()
         self._init_layout()
+        self._refresh_scraper_snapshot_from_game(reason="startup")
         self._load_map()
         self._refresh_detail_panel()
         self._turn_monitor_timer.start()
@@ -191,18 +245,118 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(f"Side: {self._side}")
         toolbar.addAction(f"Game Dir: {self._game_dir}")
-        self._regions_action = QAction("Regions", self)
-        self._regions_action.setCheckable(True)
-        self._regions_action.setChecked(True)
-        self._regions_action.triggered.connect(self._set_regions_visible)
-        toolbar.addAction(self._regions_action)
-
-        self._hex_grid_action = QAction("HexGrid", self)
-        self._hex_grid_action.setCheckable(True)
-        self._hex_grid_action.setChecked(False)
-        self._hex_grid_action.triggered.connect(self._set_hex_grid_visible)
-        toolbar.addAction(self._hex_grid_action)
         self.addToolBar(toolbar)
+
+    def _init_overlays_dock(self) -> None:
+        dock = QDockWidget("Overlays", self)
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+
+        content = QWidget(dock)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        show_map_button = QPushButton("Full Map", content)
+        show_map_button.clicked.connect(self._set_initial_map_view)
+        layout.addWidget(show_map_button)
+
+        common_checkboxes: list[QCheckBox] = []
+        common_toggle, common_body, common_layout = self._create_overlay_section(
+            content, "Common", checkboxes_ref=common_checkboxes, expanded=True
+        )
+        layout.addWidget(common_toggle)
+        layout.addWidget(common_body)
+
+        for layer_key, label in self.COMMON_OVERLAY_LAYERS:
+            default_on = layer_key in {"hexgrid", "regions"}
+            checkbox = QCheckBox(label, common_body)
+            checkbox.setChecked(default_on)
+            self._overlay_layer_visibility[layer_key] = default_on
+            if layer_key == "regions":
+                checkbox.stateChanged.connect(lambda state: self._set_regions_visible(state == Qt.Checked))
+                self._regions_checkbox = checkbox
+            elif layer_key == "hexgrid":
+                checkbox.stateChanged.connect(lambda state: self._set_hex_grid_visible(state == Qt.Checked))
+                self._hex_grid_checkbox = checkbox
+            else:
+                checkbox.stateChanged.connect(
+                    lambda state, key=layer_key: self._set_overlay_layer_visible(key, state == Qt.Checked)
+                )
+            common_layout.addWidget(checkbox)
+            common_checkboxes.append(checkbox)
+
+        for group_name, layers in self.MODE_OVERLAY_LAYERS.items():
+            group_checkboxes: list[QCheckBox] = []
+            group_toggle, group_body, group_layout = self._create_overlay_section(
+                content, group_name, checkboxes_ref=group_checkboxes, expanded=False
+            )
+            layout.addWidget(group_toggle)
+            layout.addWidget(group_body)
+            for layer_key, label in layers:
+                checkbox = QCheckBox(label, group_body)
+                checkbox.setChecked(self._overlay_layer_visibility.get(layer_key, False))
+                checkbox.stateChanged.connect(
+                    lambda state, key=layer_key: self._set_overlay_layer_visible(key, state == Qt.Checked)
+                )
+                group_layout.addWidget(checkbox)
+                group_checkboxes.append(checkbox)
+
+        layout.addStretch(1)
+        dock.setWidget(content)
+        self.addDockWidget(Qt.LeftDockWidgetArea, dock)
+        self._overlays_dock = dock
+
+    def _create_overlay_section(
+        self,
+        parent: QWidget,
+        title: str,
+        *,
+        checkboxes_ref: list[QCheckBox],
+        expanded: bool,
+    ) -> tuple[QToolButton, QWidget, QVBoxLayout]:
+        toggle = QToolButton(parent)
+        toggle.setText(title)
+        toggle.setCheckable(True)
+        toggle.setChecked(expanded)
+        toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        toggle.setArrowType(Qt.DownArrow if expanded else Qt.RightArrow)
+
+        body = QWidget(parent)
+        body.setVisible(expanded)
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(20, 2, 2, 6)
+        body_layout.setSpacing(6)
+
+        def _toggle_section(checked: bool) -> None:
+            body.setVisible(checked)
+            toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+            if not checked:
+                for cb in checkboxes_ref:
+                    cb.setChecked(False)
+
+        toggle.toggled.connect(_toggle_section)
+        return toggle, body, body_layout
+
+    def _set_overlay_layer_visible(self, layer_key: str, visible: bool) -> None:
+        self._overlay_layer_visibility[layer_key] = bool(visible)
+        for item in self._overlay_items.get(layer_key, []):
+            item.setVisible(bool(visible))
+        self._refresh_detail_panel()
+
+    def _set_initial_map_view(self) -> None:
+        if self._map_view is None or self._map_width <= 0:
+            return
+
+        viewport_width = self._map_view.viewport().width()
+        if viewport_width <= 0:
+            return
+
+        scale_factor = viewport_width / float(self._map_width)
+        self._map_view.resetTransform()
+        self._map_view.scale(scale_factor, scale_factor)
+        self._map_view.horizontalScrollBar().setValue(0)
+        self._map_view.verticalScrollBar().setValue(0)
 
     def _init_layout(self) -> None:
         map_view = MapView(self._scene, self)
@@ -228,8 +382,15 @@ class MainWindow(QMainWindow):
         self._scene.setSceneRect(0, 0, self._map_width, self._map_height)
         self._build_regions_overlay(self._map_width, self._map_height)
         self._build_hex_grid_overlay(self._map_width, self._map_height)
+        self._build_submarine_patrols_overlay()
+        self._build_submarine_threats_overlay()
+        self._build_invasions_overlay()
+        self._build_threats_overlay()
+        self._build_combat_overlay()
         self._set_regions_visible(self._regions_visible)
         self._set_hex_grid_visible(self._hex_grid_visible)
+        for layer_key in self._overlay_items:
+            self._set_overlay_layer_visible(layer_key, self._overlay_layer_visibility.get(layer_key, False))
         self._selected_hex_item = None
         self._selected_hex = None
 
@@ -241,9 +402,7 @@ class MainWindow(QMainWindow):
         )
 
         if self._map_view is not None:
-            self._map_view.resetTransform()
-            self._map_view.horizontalScrollBar().setValue(0)
-            self._map_view.verticalScrollBar().setValue(0)
+            QTimer.singleShot(0, self._set_initial_map_view)
 
     def _build_regions_overlay(self, map_width: int, map_height: int) -> None:
         self._region_items.clear()
@@ -323,6 +482,438 @@ class MainWindow(QMainWindow):
         grid_item.setZValue(30)
         self._scene.addItem(grid_item)
         self._hex_grid_items.append(grid_item)
+
+    def set_scraper_snapshot(
+        self,
+        *,
+        records: dict[str, list[dict]] | None = None,
+        objects: dict[str, dict] | None = None,
+    ) -> None:
+        """Receive in-memory scraper dataset snapshot for overlay rendering."""
+        for dataset_name, payload in (records or {}).items():
+            key = str(dataset_name).strip().lower()
+            if isinstance(payload, list):
+                self._scraper_records_cache[key] = [
+                    item for item in payload
+                    if isinstance(item, dict) and self._record_matches_selected_side(item)
+                ]
+        for dataset_name, payload in (objects or {}).items():
+            key = str(dataset_name).strip().lower()
+            if isinstance(payload, dict):
+                self._scraper_object_cache[key] = dict(payload)
+        logger.info(
+            "Scraper snapshot received: %s record datasets, %s object datasets",
+            len(records or {}),
+            len(objects or {}),
+        )
+
+    def _refresh_scraper_snapshot_from_game(self, *, reason: str) -> None:
+        """Refresh in-memory snapshot directly from legacy DLL scraper logic."""
+        try:
+            records, objects = scrape_snapshot(self._game_dir, self._save_path, self._side)
+        except Exception as exc:
+            logger.warning(
+                "In-process scraper refresh failed (%s): %s. "
+                "Sub patrols from wpae000 require legacy scraper availability.",
+                reason,
+                exc,
+            )
+            return
+
+        self.set_scraper_snapshot(records=records, objects=objects)
+        logger.info("In-process scraper refresh complete (%s)", reason)
+
+    def _record_matches_selected_side(self, record: dict) -> bool:
+        """Check if a record belongs to the selected side."""
+        for field in ("nation", "side", "nationality"):
+            if field in record:
+                nation = str(record.get(field, "")).lower()
+                is_japanese = ("japan" in nation) or ("ijn" in nation)
+                return is_japanese if self._side.upper() == "JAPAN" else (not is_japanese)
+        return True
+
+    def _get_scraper_records(self, dataset_name: str) -> list[dict]:
+        """Get filtered records from scraper cache."""
+        key = str(dataset_name).strip().lower()
+        return list(self._scraper_records_cache.get(key, []))
+
+    def _get_scraper_object(self, dataset_name: str) -> dict:
+        """Get object from scraper cache."""
+        key = str(dataset_name).strip().lower()
+        return dict(self._scraper_object_cache.get(key, {}))
+
+    @staticmethod
+    def _safe_int(value, default: int = 0) -> int:
+        """Safely convert value to int."""
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _extract_xy_from_position(payload) -> tuple[int, int] | None:
+        """Extract x,y hex coordinates from position dict."""
+        if not isinstance(payload, dict):
+            return None
+        x = MainWindow._safe_int(payload.get("x"), 0)
+        y = MainWindow._safe_int(payload.get("y"), 0)
+        if x < 1 or y < 1 or x > GAME_COLS or y > GAME_ROWS:
+            return None
+        return (x, y)
+
+    def _text_log_candidates(self) -> list[Path]:
+        allowed_names = self.ALLIED_TEXT_LOG_NAMES if self._side.upper() == "ALLIED" else self.JAPAN_TEXT_LOG_NAMES
+        side_folder = "ALLIED" if self._side.upper() == "ALLIED" else "JAPAN"
+        search_folders = [self._save_path, self._save_path / side_folder]
+        paths: list[Path] = []
+        seen: set[Path] = set()
+
+        for folder in search_folders:
+            if not folder.exists():
+                continue
+            for suffix in ("*.txt", "*.log"):
+                for path in sorted(folder.glob(suffix)):
+                    if not path.is_file():
+                        continue
+                    if path.name.lower() not in allowed_names:
+                        continue
+                    if path in seen:
+                        continue
+                    seen.add(path)
+                    paths.append(path)
+        return paths
+
+    def _extract_hex_from_text(self, line: str) -> tuple[int, int] | None:
+        match = self.HEX_COORDINATE_PATTERN.search(line)
+        if match is None:
+            match = self.HEX_COORDINATE_AT_PATTERN.search(line)
+        if match is None:
+            return None
+
+        x = self._safe_int(match.group("x"), 0)
+        y = self._safe_int(match.group("y"), 0)
+        if x < 1 or y < 1 or x > GAME_COLS or y > GAME_ROWS:
+            return None
+        return (x, y)
+
+    def _line_is_submarine_patrol(self, line: str) -> bool:
+        text = line.lower()
+        has_sub = ("submarine" in text) or (self.SUB_WORD_PATTERN.search(text) is not None)
+        if not has_sub:
+            return False
+        if "submarine tf" in text and ("reports having been sighted" in text or "reports sighted" in text):
+            return True
+        return (
+            "sub patrol" in text
+            or "subpatrol" in text
+            or "on patrol" in text
+            or "patrolling" in text
+            or "patrol area" in text
+        )
+
+    def _line_is_submarine_threat(self, line: str) -> bool:
+        text = line.lower()
+        has_sub = ("submarine" in text) or (self.SUB_WORD_PATTERN.search(text) is not None)
+        if not has_sub:
+            return False
+
+        return (
+            "sub attack" in text
+            or "submarine attack" in text
+            or "enemy sub" in text
+            or "sub sighted" in text
+            or "submarine sighted" in text
+            or "sub spotted" in text
+            or "submarine spotted" in text
+            or "asw attack" in text
+        )
+
+    def _collect_submarine_hexes_from_logs(self, *, mode: str) -> set[tuple[int, int]]:
+        result: set[tuple[int, int]] = set()
+        for log_path in self._text_log_candidates():
+            parsed_file = False
+            for encoding in ("utf-8", "utf-8-sig", "utf-16", "cp1252"):
+                try:
+                    log_text = log_path.read_text(encoding=encoding)
+                except (OSError, UnicodeError):
+                    continue
+
+                parsed_file = True
+                before_count = len(result)
+                for line in log_text.splitlines():
+                    is_match = (
+                        self._line_is_submarine_patrol(line)
+                        if mode == "patrol"
+                        else self._line_is_submarine_threat(line)
+                    )
+                    if not is_match:
+                        continue
+                    game_hex = self._extract_hex_from_text(line)
+                    if game_hex is not None:
+                        result.add(game_hex)
+
+                logger.info(
+                    "Parsed log for submarine %s markers: path=%s encoding=%s new=%s total=%s",
+                    mode,
+                    log_path,
+                    encoding,
+                    len(result) - before_count,
+                    len(result),
+                )
+                break
+
+            if not parsed_file:
+                logger.info("Skipping text log; unable to decode with supported encodings: path=%s", log_path)
+
+        return result
+
+    def _hex_center_for_game_hex(self, game_x: int, game_y: int) -> QPointF | None:
+        """Get pixel center for a game hex coordinate."""
+        if game_x < 1 or game_y < 1 or game_x > GAME_COLS or game_y > GAME_ROWS:
+            return None
+        return self._hex_center(game_x - 1, game_y - 1)
+
+    def _draw_hex_radius_circle(
+        self,
+        layer_key: str,
+        game_hex: tuple[int, int],
+        *,
+        radius_hexes: float = 2.0,
+        stroke: QColor,
+        fill: QColor,
+        width: float = 1.4,
+        z_value: float = 34.0,
+    ) -> None:
+        """Draw a circular marker centered on a hex."""
+        center = self._hex_center_for_game_hex(game_hex[0], game_hex[1])
+        if center is None:
+            return
+        radius_px = max(2.0, float(radius_hexes) * self._hex_width)
+        marker = QGraphicsEllipseItem(
+            center.x() - radius_px,
+            center.y() - radius_px,
+            radius_px * 2.0,
+            radius_px * 2.0,
+        )
+        marker.setPen(QPen(stroke, width))
+        marker.setBrush(QBrush(fill))
+        marker.setZValue(z_value)
+        self._scene.addItem(marker)
+        self._overlay_items[layer_key].append(marker)
+
+    def _build_submarine_patrols_overlay(self) -> None:
+        """Build overlay for submarine patrol targets hexes."""
+        layer_key = "submarine_patrols"
+        self._overlay_items[layer_key].clear()
+
+        patrol_targets: set[tuple[int, int]] = set()
+        taskforce_records = self._get_scraper_records("taskforces")
+        if not taskforce_records:
+            logger.warning(
+                "No in-memory taskforces snapshot is loaded for side=%s. "
+                "Submarine patrol markers from wpae000 require a scraper snapshot via set_scraper_snapshot().",
+                self._side,
+            )
+        
+        for record in taskforce_records:
+            mission = str(record.get("mission", "")).strip().upper()
+            if mission != "SUBPATROL":
+                continue
+            target_x = self._safe_int(record.get("target_x"), 0)
+            target_y = self._safe_int(record.get("target_y"), 0)
+            if target_x < 1 or target_y < 1 or target_x > GAME_COLS or target_y > GAME_ROWS:
+                continue
+            patrol_targets.add((target_x, target_y))
+
+        patrol_targets_from_logs = self._collect_submarine_hexes_from_logs(mode="patrol")
+        patrol_targets.update(patrol_targets_from_logs)
+
+        logger.info(
+            "Submarine patrol overlay: side=%s taskforce_records=%d patrol_targets=%d (log-derived=%d)",
+            self._side,
+            len(taskforce_records),
+            len(patrol_targets),
+            len(patrol_targets_from_logs),
+        )
+
+        for game_hex in sorted(patrol_targets):
+            self._draw_hex_radius_circle(
+                layer_key,
+                game_hex,
+                radius_hexes=2.0,
+                stroke=QColor(70, 220, 120, 220),
+                fill=QColor(70, 220, 120, 48),
+                width=1.4,
+                z_value=34.0,
+            )
+
+    def _build_submarine_threats_overlay(self) -> None:
+        """Build overlay for submarine threat areas."""
+        layer_key = "submarine_threats"
+        self._overlay_items[layer_key].clear()
+
+        threat_hexes: set[tuple[int, int]] = set()
+        threat_payload = self._get_scraper_object("threats")
+        
+        sub_threat_areas = threat_payload.get("sub_threat_areas", [])
+        if isinstance(sub_threat_areas, list):
+            for record in sub_threat_areas:
+                if isinstance(record, dict):
+                    pos = self._extract_xy_from_position(record.get("position"))
+                    if pos is not None:
+                        threat_hexes.add(pos)
+
+        threat_areas = threat_payload.get("threat_areas", [])
+        if isinstance(threat_areas, list):
+            for record in threat_areas:
+                if not isinstance(record, dict):
+                    continue
+                threat_types = record.get("threat_types", [])
+                has_sub = False
+                if isinstance(threat_types, list):
+                    for tt in threat_types:
+                        if "SUB" in str(tt).upper():
+                            has_sub = True
+                            break
+                elif isinstance(threat_types, str) and "SUB" in threat_types.upper():
+                    has_sub = True
+                
+                if has_sub:
+                    pos = self._extract_xy_from_position(record.get("position"))
+                    if pos is not None:
+                        threat_hexes.add(pos)
+
+        threat_hexes_from_logs = self._collect_submarine_hexes_from_logs(mode="threat")
+        threat_hexes.update(threat_hexes_from_logs)
+
+        logger.info(
+            "Submarine threat overlay: side=%s threat_hexes=%d (log-derived=%d)",
+            self._side,
+            len(threat_hexes),
+            len(threat_hexes_from_logs),
+        )
+
+        for game_hex in sorted(threat_hexes):
+            self._draw_hex_radius_circle(
+                layer_key,
+                game_hex,
+                radius_hexes=2.0,
+                stroke=QColor(232, 82, 82, 230),
+                fill=QColor(232, 82, 82, 45),
+                width=1.4,
+                z_value=34.0,
+            )
+
+    def _build_invasions_overlay(self) -> None:
+        """Build overlay for invasion landing zones."""
+        layer_key = "invasions"
+        self._overlay_items[layer_key].clear()
+
+        invasion_hexes: set[tuple[int, int]] = set()
+        invasion_records = self._get_scraper_records("invasions")
+
+        for record in invasion_records:
+            pos = self._extract_xy_from_position(record.get("position"))
+            if pos is None:
+                pos = self._extract_xy_from_position(record.get("threat_base_position"))
+            if pos is not None:
+                invasion_hexes.add(pos)
+
+        logger.info(
+            "Invasions overlay: side=%s invasion_records=%d unique_hexes=%d",
+            self._side,
+            len(invasion_records),
+            len(invasion_hexes),
+        )
+
+        for game_hex in sorted(invasion_hexes):
+            self._draw_hex_radius_circle(
+                layer_key,
+                game_hex,
+                radius_hexes=2.5,
+                stroke=QColor(255, 102, 0, 220),
+                fill=QColor(255, 102, 0, 50),
+                width=2.0,
+                z_value=33.0,
+            )
+
+    def _build_threats_overlay(self) -> None:
+        """Build overlay for general air/naval threats (non-submarine)."""
+        layer_key = "threats"
+        self._overlay_items[layer_key].clear()
+
+        threat_hexes: set[tuple[int, int]] = set()
+        threat_payload = self._get_scraper_object("threats")
+
+        threat_areas = threat_payload.get("threat_areas", [])
+        if isinstance(threat_areas, list):
+            for record in threat_areas:
+                if not isinstance(record, dict):
+                    continue
+                threat_types = record.get("threat_types", [])
+                has_sub = False
+                if isinstance(threat_types, list):
+                    for tt in threat_types:
+                        if "SUB" in str(tt).upper():
+                            has_sub = True
+                            break
+                elif isinstance(threat_types, str) and "SUB" in threat_types.upper():
+                    has_sub = True
+                
+                if not has_sub:
+                    pos = self._extract_xy_from_position(record.get("position"))
+                    if pos is not None:
+                        threat_hexes.add(pos)
+
+        logger.info(
+            "General threats overlay: side=%s threat_hexes=%d",
+            self._side,
+            len(threat_hexes),
+        )
+
+        for game_hex in sorted(threat_hexes):
+            self._draw_hex_radius_circle(
+                layer_key,
+                game_hex,
+                radius_hexes=2.0,
+                stroke=QColor(200, 100, 200, 220),
+                fill=QColor(200, 100, 200, 48),
+                width=1.4,
+                z_value=32.0,
+            )
+
+    def _build_combat_overlay(self) -> None:
+        """Build overlay for active combat zones."""
+        layer_key = "combat"
+        self._overlay_items[layer_key].clear()
+
+        combat_hexes: set[tuple[int, int]] = set()
+        combat_records = self._get_scraper_records("combats")
+        if not combat_records:
+            combat_records = self._get_scraper_records("combat_zones")
+
+        for record in combat_records:
+            pos = self._extract_xy_from_position(record.get("position"))
+            if pos is not None:
+                combat_hexes.add(pos)
+
+        logger.info(
+            "Combat overlay: side=%s combat_zones=%d unique_hexes=%d",
+            self._side,
+            len(combat_records),
+            len(combat_hexes),
+        )
+
+        for game_hex in sorted(combat_hexes):
+            self._draw_hex_radius_circle(
+                layer_key,
+                game_hex,
+                radius_hexes=1.8,
+                stroke=QColor(255, 0, 0, 240),
+                fill=QColor(255, 0, 0, 60),
+                width=1.8,
+                z_value=35.0,
+            )
 
     def _row_offset(self, row_zero: int) -> float:
         if self.SHIFT_EVEN_ROWS_RIGHT:
@@ -427,15 +1018,28 @@ class MainWindow(QMainWindow):
         self._refresh_detail_panel()
 
     def _set_regions_visible(self, visible: bool) -> None:
-        self._regions_visible = visible
-        visibility = visible
+        visibility = bool(visible)
+        self._regions_visible = visibility
+        self._overlay_layer_visibility["regions"] = visibility
         for item in self._region_items:
             item.setVisible(visibility)
+        if self._regions_checkbox is not None and self._regions_checkbox.isChecked() != visibility:
+            self._regions_checkbox.blockSignals(True)
+            self._regions_checkbox.setChecked(visibility)
+            self._regions_checkbox.blockSignals(False)
+        self._refresh_detail_panel()
 
     def _set_hex_grid_visible(self, visible: bool) -> None:
-        self._hex_grid_visible = visible
+        visibility = bool(visible)
+        self._hex_grid_visible = visibility
+        self._overlay_layer_visibility["hexgrid"] = visibility
         for item in self._hex_grid_items:
-            item.setVisible(visible)
+            item.setVisible(visibility)
+        if self._hex_grid_checkbox is not None and self._hex_grid_checkbox.isChecked() != visibility:
+            self._hex_grid_checkbox.blockSignals(True)
+            self._hex_grid_checkbox.setChecked(visibility)
+            self._hex_grid_checkbox.blockSignals(False)
+        self._refresh_detail_panel()
 
     def _save_file_signature(self, file_name: str) -> tuple[int, int]:
         save_file = self._save_path / file_name
@@ -445,16 +1049,9 @@ class MainWindow(QMainWindow):
         return (int(stat.st_mtime_ns), int(stat.st_size))
 
     def _side_data_paths(self) -> list[Path]:
-        side_folder = "ALLIED" if self._side.upper() == "ALLIED" else "JAPAN"
-        data_root = self._save_path / side_folder
-        return [
-            data_root / "airgroups.json",
-            data_root / "bases.json",
-            data_root / "ground_units.json",
-            data_root / "ships.json",
-            data_root / "taskforces.json",
-            data_root / "threats.json",
-        ]
+        paths = [self._save_path / "wpae000.pws", self._save_path / "wpae002.pws"]
+        paths.extend(self._text_log_candidates())
+        return paths
 
     def _side_data_signature(self) -> tuple[tuple[str, int, int], ...]:
         signature: list[tuple[str, int, int]] = []
@@ -552,10 +1149,12 @@ class MainWindow(QMainWindow):
         self._show_turn_modal(
             "Turn file stabilized.\n"
             "Running post-turn processing:\n"
+            "- refreshing in-process scraper snapshot\n"
             "- reloading base map\n"
             "- rebuilding overlays\n"
             "- refreshing data snapshot"
         )
+        self._refresh_scraper_snapshot_from_game(reason="end-turn")
         self._rebuild_presentable_state()
         self._data_signature = self._side_data_signature()
         self._turn_progress_dialog.hide()
@@ -611,6 +1210,12 @@ class MainWindow(QMainWindow):
                 lines.append(f"- {file_name}: ready ({size_kb} KB)")
             else:
                 lines.append(f"- {file_name}: missing")
+
+        lines.extend(["", "Overlay marker counts:"])
+        for layer_key in ["submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
+            marker_count = len(self._overlay_items.get(layer_key, []))
+            is_visible = "ON" if marker_count > 0 else "OFF"
+            lines.append(f"- {layer_key}: {is_visible} (markers: {marker_count})")
 
         self._detail_panel.setPlainText("\n".join(lines))
 
