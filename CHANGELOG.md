@@ -14,6 +14,8 @@ The format is based on Keep a Changelog.
 - Removed TRANSPORT, FASTTRANSPORT, and AMPHIB missions from the **Other TF** overlay (Surface section); they now appear exclusively in the new **Transport TF** overlay under Ground.
 
 ### Fixed
+- Fixed startup `AttributeError: 'MainWindow' object has no attribute '_update_tf_legend'` crash caused by a missing `def _update_tf_legend(self) -> None:` method header; the method body was present but unreachable.
+- Fixed startup `AttributeError: type object 'MainWindow' has no attribute 'GAME_EXECUTABLE'` crash when opening the Startup Game dialog by adding the missing `GAME_EXECUTABLE = "witpae.exe"` class attribute.
 - Fixed startup `NameError: name 'color' is not defined` crash in `_build_logistics_taskforces_overlay` — the call to `_draw_taskforce_line` now correctly passes `color=line_color`.
 - Restored the missing for-loop body in `_build_cv_tfs_overlay` (coordinate extraction, line drawing, `drawn` counter, and post-loop legend/log) that had been accidentally truncated.
 - Removed orphaned logistics TF drawing code that had ended up inside `_update_tf_legend`'s `if self._map_view` block, causing a second potential `NameError` whenever the legend was updated.
