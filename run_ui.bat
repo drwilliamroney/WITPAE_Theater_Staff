@@ -7,6 +7,7 @@ rem ================================================================
 rem run_ui.bat — WITPAE Theater Staff (PyQt5)
 rem
 rem Launch flow:
+rem   0) Git pull to fetch latest code and update .venv
 rem   1) Find Python 3.13 x86 interpreter
 rem   2) Validate game DLL presence
 rem   3) Create/update .venv and install dependencies
@@ -22,6 +23,25 @@ set "GAME_DLL_1=pwsdll.dll"
 set "GAME_DLL_2=pwsdll7.dll"
 
 goto main
+
+:git_update
+where git >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] git not found in PATH — skipping repository update.
+    exit /b 0
+)
+git rev-parse --is-inside-work-tree >nul 2>&1
+if errorlevel 1 (
+    echo [WARN] Not inside a git repository — skipping repository update.
+    exit /b 0
+)
+echo [INFO] Fetching latest changes from remote...
+git pull --ff-only
+if errorlevel 1 (
+    echo [WARN] git pull --ff-only failed — continuing with existing local code.
+    echo [WARN] (This may be due to local uncommitted changes or a non-linear history.)
+)
+exit /b 0
 
 :check_game_dlls
 set "MISSING_DLLS=0"
@@ -136,6 +156,10 @@ exit /b 0
 
 :main
 
+rem -- 0. Git pull to fetch latest code and refresh .venv --------------------
+call :git_update
+
+rem -- 1. Find Python --------------------------------------------------------
 call :find_python
 if errorlevel 1 (
     pause

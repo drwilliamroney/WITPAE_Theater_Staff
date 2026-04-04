@@ -7,6 +7,7 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- `run_ui.bat` and `run_ui.ps1` now perform a `git pull` at startup to fetch the latest code before launching; if git is unavailable or the pull fails the scripts warn and continue with the existing local code.
 - Added CV TFs and Other TF surface overlay checkboxes to the Surface mode section of the overlays dock.
 - CV TFs overlay draws movement lines (start-of-day to end-of-day with arrowhead, dashed line to target destination) for all AIRCOMBAT-mission task forces.
 - Other TF overlay draws per-type colored movement lines for all task forces excluding air-combat, cargo, replenishment, tanker, and sub-patrol missions.
