@@ -16,6 +16,7 @@ from PyQt5.QtGui import QBrush, QColor, QFont, QImage, QPainter, QPainterPath, Q
 from PyQt5.QtWidgets import (
     QAction,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDockWidget,
@@ -23,12 +24,12 @@ from PyQt5.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsPolygonItem,
     QGraphicsPixmapItem,
+    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
     QGraphicsView,
     QMainWindow,
     QProgressDialog,
-    QPushButton,
     QSplitter,
     QLabel,
     QLineEdit,
@@ -42,7 +43,7 @@ from PyQt5.QtWidgets import (
 )
 
 from app.map_assembly import MapAssembly
-from app.regions_overlay import GAME_COLS, GAME_ROWS, REGION_DEFINITIONS
+from app.regions_overlay import GAME_COLS, GAME_ROWS, REGION_DEFINITIONS, RegionDefinition
 from app.runtime_scraper import scrape_snapshot
 
 
@@ -200,7 +201,10 @@ class MainWindow(QMainWindow):
         ],
         "Air": [],
         "Ground": [],
-        "Logistics": [],
+        "Logistics": [
+            ("logistics_taskforces", "Task Forces"),
+            ("logistics_bases", "Bases"),
+        ],
     }
 
     # CV TF missions (air-combat carrier task forces).
@@ -314,6 +318,8 @@ class MainWindow(QMainWindow):
             "other_tfs": False,
             "submarine_patrols": False,
             "submarine_threats": False,
+            "logistics_taskforces": False,
+            "logistics_bases": False,
         }
         self._map_view: MapView | None = None
         self._detail_panel: QTextEdit | None = None
@@ -339,6 +345,8 @@ class MainWindow(QMainWindow):
             "other_tfs": [],
             "submarine_patrols": [],
             "submarine_threats": [],
+            "logistics_taskforces": [],
+            "logistics_bases": [],
         }
 
         self._turn_progress_dialog: QProgressDialog | None = None
@@ -387,9 +395,12 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(8)
 
-        show_map_button = QPushButton("Full Map", content)
-        show_map_button.clicked.connect(self._set_initial_map_view)
-        layout.addWidget(show_map_button)
+        map_view_combo = QComboBox(content)
+        map_view_combo.addItem("Full Map")
+        for region in REGION_DEFINITIONS:
+            map_view_combo.addItem(region.name)
+        map_view_combo.currentIndexChanged.connect(self._on_map_view_selection_changed)
+        layout.addWidget(map_view_combo)
 
         common_checkboxes: list[QCheckBox] = []
         common_toggle, common_body, common_layout = self._create_overlay_section(
@@ -490,6 +501,44 @@ class MainWindow(QMainWindow):
         self._map_view.horizontalScrollBar().setValue(0)
         self._map_view.verticalScrollBar().setValue(0)
 
+    def _on_map_view_selection_changed(self, index: int) -> None:
+        """Handle map view dropdown selection changes."""
+        if index == 0:
+            self._set_initial_map_view()
+        elif 1 <= index <= len(REGION_DEFINITIONS):
+            self._zoom_to_region(REGION_DEFINITIONS[index - 1])
+
+    def _zoom_to_region(self, region: RegionDefinition) -> None:
+        """Zoom the map so the region's top-left is at the canvas top-left and its width fills the canvas."""
+        if self._map_view is None or self._map_width <= 0 or self._map_height <= 0:
+            return
+
+        viewport = self._map_view.viewport()
+        viewport_width = viewport.width()
+        viewport_height = viewport.height()
+        if viewport_width <= 0:
+            return
+
+        step_x = self._map_width / (GAME_COLS - 1)
+        step_y = self._map_height / (GAME_ROWS - 1)
+
+        xs = [(hx - 1) * step_x for (hx, _hy) in region.polygon_hex]
+        ys = [(hy - 1) * step_y for (_hx, hy) in region.polygon_hex]
+        min_x = min(xs)
+        min_y = min(ys)
+        max_x = max(xs)
+        region_width = max_x - min_x
+        if region_width <= 0:
+            return
+
+        scale_factor = viewport_width / region_width
+        self._map_view.resetTransform()
+        self._map_view.scale(scale_factor, scale_factor)
+
+        center_x = min_x + viewport_width / (2.0 * scale_factor)
+        center_y = min_y + viewport_height / (2.0 * scale_factor)
+        self._map_view.centerOn(center_x, center_y)
+
     def _init_layout(self) -> None:
         map_view = MapView(self._scene, self)
         detail_panel = QTextEdit(self)
@@ -525,6 +574,8 @@ class MainWindow(QMainWindow):
         self._build_combat_overlay()
         self._build_cv_tfs_overlay()
         self._build_other_tfs_overlay()
+        self._build_logistics_taskforces_overlay()
+        self._build_base_status_overlay()
         self._set_regions_visible(self._regions_visible)
         self._set_hex_grid_visible(self._hex_grid_visible)
         for layer_key in self._overlay_items:
@@ -1139,6 +1190,43 @@ class MainWindow(QMainWindow):
             mission = str(record.get("mission", "")).strip().upper()
             if mission not in self.CV_TF_MISSIONS:
                 continue
+    # Mission label → (line RGB, dot RGBA)
+    LOGISTICS_TF_MISSION_STYLE: list[tuple[str, tuple[int, int, int], tuple[int, int, int, int]]] = [
+        ("CARGO",         (80,  200, 255),  (80,  200, 255, 180)),
+        ("TANKER",        (255, 200,  60),  (255, 200,  60, 180)),
+        ("REPLENISHMENT", (120, 240, 120),  (120, 240, 120, 180)),
+    ]
+
+    def _build_logistics_taskforces_overlay(self) -> None:
+        """Draw movement lines for cargo, tanker, and replenishment task forces with a legend."""
+        layer_key = "logistics_taskforces"
+        self._overlay_items[layer_key].clear()
+
+        taskforce_records = self._get_scraper_records("taskforces")
+        if not taskforce_records:
+            logger.info(
+                "Logistics TF overlay: no taskforces snapshot loaded for side=%s", self._side
+            )
+
+        # Build a lookup of mission name → style (line color, dot color)
+        mission_style: dict[str, tuple[QColor, QColor, QColor]] = {}
+        for mission_name, rgb_line, rgba_dot in self.LOGISTICS_TF_MISSION_STYLE:
+            line_color = QColor(*rgb_line)
+            dot_color = QColor(*rgba_dot)
+            dot_border = QColor(rgb_line[0], rgb_line[1], rgb_line[2], 220)
+            mission_style[mission_name] = (line_color, dot_color, dot_border)
+
+        logistics_missions = {m for m, _, _ in self.LOGISTICS_TF_MISSION_STYLE}
+        drawn_by_mission: dict[str, int] = {m: 0 for m in logistics_missions}
+
+        for record in taskforce_records:
+            mission = str(record.get("mission", "")).strip().upper()
+            if mission not in logistics_missions:
+                continue
+
+            style = mission_style[mission]
+            line_color, dot_color, dot_border = style
+
             start_x = self._safe_int(record.get("start_of_day_x"), 0)
             start_y = self._safe_int(record.get("start_of_day_y"), 0)
             end_x = self._safe_int(record.get("end_of_day_x"), 0)
@@ -1228,6 +1316,217 @@ class MainWindow(QMainWindow):
         self._tf_legend_overlay.set_entries(entries)
         if self._map_view is not None:
             self._map_view.reposition_legend_overlay()
+
+
+            start_valid = 1 <= start_x <= GAME_COLS and 1 <= start_y <= GAME_ROWS
+            end_valid = 1 <= end_x <= GAME_COLS and 1 <= end_y <= GAME_ROWS
+
+            # Draw movement line start→end when both coordinates are known.
+            if start_valid and end_valid:
+                start_pt = self._hex_center_for_game_hex(start_x, start_y)
+                end_pt = self._hex_center_for_game_hex(end_x, end_y)
+                if start_pt is not None and end_pt is not None:
+                    pen = QPen(line_color, 1.6, Qt.SolidLine)
+                    pen.setCapStyle(Qt.RoundCap)
+                    path = QPainterPath()
+                    path.moveTo(start_pt)
+                    path.lineTo(end_pt)
+                    line_item = QGraphicsPathItem(path)
+                    line_item.setPen(pen)
+                    line_item.setZValue(36.0)
+                    self._scene.addItem(line_item)
+                    self._overlay_items[layer_key].append(line_item)
+
+            # Draw a dot at the end-of-day position (current location).
+            if end_valid:
+                center = self._hex_center_for_game_hex(end_x, end_y)
+                if center is not None:
+                    dot_r = max(3.0, self._hex_width * 0.35)
+                    dot_item = QGraphicsEllipseItem(
+                        center.x() - dot_r,
+                        center.y() - dot_r,
+                        dot_r * 2.0,
+                        dot_r * 2.0,
+                    )
+                    dot_item.setPen(QPen(dot_border, 1.2))
+                    dot_item.setBrush(QBrush(dot_color))
+                    dot_item.setZValue(37.0)
+                    self._scene.addItem(dot_item)
+                    self._overlay_items[layer_key].append(dot_item)
+
+            drawn_by_mission[mission] = drawn_by_mission.get(mission, 0) + 1
+
+        # Draw a compact legend in the top-left corner of the scene.
+        self._draw_logistics_tf_legend(layer_key, mission_style, drawn_by_mission)
+
+        logger.info(
+            "Logistics TF overlay: side=%s drawn=%s",
+            self._side,
+            drawn_by_mission,
+        )
+
+    def _draw_logistics_tf_legend(
+        self,
+        layer_key: str,
+        mission_style: dict[str, tuple[QColor, QColor, QColor]],
+        drawn_by_mission: dict[str, int],
+    ) -> None:
+        """Render a small map legend for logistics task force mission colors."""
+        legend_x = 40.0
+        legend_y = 40.0
+        row_height = 22.0
+        swatch_w = 30.0
+        swatch_h = 10.0
+        font = QFont("Segoe UI", 8)
+
+        # Background rectangle — sized to fit all rows.
+        rows_shown = [m for m, _, _ in self.LOGISTICS_TF_MISSION_STYLE if drawn_by_mission.get(m, 0) > 0]
+        if not rows_shown:
+            return
+
+        bg_w = 170.0
+        bg_h = row_height * len(rows_shown) + 10.0
+        bg = QGraphicsRectItem(legend_x - 6, legend_y - 6, bg_w, bg_h)
+        bg.setBrush(QBrush(QColor(20, 20, 20, 170)))
+        bg.setPen(QPen(QColor(180, 180, 180, 120), 0.8))
+        bg.setZValue(50.0)
+        self._scene.addItem(bg)
+        self._overlay_items[layer_key].append(bg)
+
+        for i, mission_name in enumerate(rows_shown):
+            line_color, dot_color, dot_border = mission_style[mission_name]
+            row_y = legend_y + i * row_height
+
+            # Color swatch line.
+            sw_path = QPainterPath()
+            sw_path.moveTo(legend_x, row_y + swatch_h / 2.0)
+            sw_path.lineTo(legend_x + swatch_w, row_y + swatch_h / 2.0)
+            sw_item = QGraphicsPathItem(sw_path)
+            sw_item.setPen(QPen(line_color, 2.5))
+            sw_item.setZValue(51.0)
+            self._scene.addItem(sw_item)
+            self._overlay_items[layer_key].append(sw_item)
+
+            # Dot at end of swatch.
+            dot_r = 4.0
+            dot_item = QGraphicsEllipseItem(
+                legend_x + swatch_w - dot_r,
+                row_y + swatch_h / 2.0 - dot_r,
+                dot_r * 2.0,
+                dot_r * 2.0,
+            )
+            dot_item.setPen(QPen(dot_border, 1.0))
+            dot_item.setBrush(QBrush(dot_color))
+            dot_item.setZValue(52.0)
+            self._scene.addItem(dot_item)
+            self._overlay_items[layer_key].append(dot_item)
+
+            # Label: mission name + count.
+            count = drawn_by_mission.get(mission_name, 0)
+            label = QGraphicsSimpleTextItem(f"{mission_name.capitalize()} ({count})")
+            label.setFont(font)
+            label.setBrush(QBrush(QColor(240, 240, 240)))
+            label.setPos(legend_x + swatch_w + 8.0, row_y)
+            label.setZValue(52.0)
+            self._scene.addItem(label)
+            self._overlay_items[layer_key].append(label)
+
+    def _build_base_status_overlay(self) -> None:
+        """Draw base status markers color-coded by port level and damage state."""
+        layer_key = "logistics_bases"
+        self._overlay_items[layer_key].clear()
+
+        base_records = self._get_scraper_records("bases")
+        if not base_records:
+            logger.info(
+                "Base status overlay: no bases snapshot loaded for side=%s", self._side
+            )
+
+        drawn = 0
+        for record in base_records:
+            # Position from the record's position dict or direct x/y fields.
+            pos = self._extract_xy_from_position(record.get("position"))
+            if pos is None:
+                x = self._safe_int(record.get("x"), 0)
+                y = self._safe_int(record.get("y"), 0)
+                if 1 <= x <= GAME_COLS and 1 <= y <= GAME_ROWS:
+                    pos = (x, y)
+            if pos is None:
+                continue
+
+            port = self._safe_int(record.get("port"), 0)
+            airfield = self._safe_int(record.get("airfield"), 0)
+            port_damage = self._safe_int(record.get("port_damage"), 0)
+            runway_damage = self._safe_int(record.get("runway_damage"), 0)
+            airfield_damage = self._safe_int(record.get("airfield_damage"), 0)
+            supply = self._safe_int(record.get("supply"), 0)
+
+            # Color coding follows pywitpui conventions:
+            # - Major bases (port >= 6) → gold
+            # - Large bases (port 4-5 or airfield >= 5) → blue
+            # - Medium bases (port 2-3) → green
+            # - Minor bases (port 1 or airfield >= 1) → dim grey
+            # - Damage present → shift toward red tint
+            # - Supply < 1000 at significant base → orange tint warning
+            base_level = max(port, airfield)
+            if port >= 6:
+                stroke = QColor(255, 215, 0, 220)   # gold
+                fill = QColor(255, 215, 0, 60)
+            elif port >= 4 or airfield >= 5:
+                stroke = QColor(100, 160, 255, 220)  # blue
+                fill = QColor(100, 160, 255, 50)
+            elif port >= 2:
+                stroke = QColor(80, 200, 120, 220)   # green
+                fill = QColor(80, 200, 120, 45)
+            elif base_level >= 1:
+                stroke = QColor(180, 180, 180, 180)  # grey
+                fill = QColor(180, 180, 180, 35)
+            else:
+                continue  # skip locations with no port or airfield
+
+            # Apply red tint when significant damage is present.
+            total_damage = port_damage + runway_damage + airfield_damage
+            if total_damage >= 30:
+                stroke = QColor(
+                    min(255, stroke.red() + 80),
+                    max(0, stroke.green() - 60),
+                    max(0, stroke.blue() - 60),
+                    stroke.alpha(),
+                )
+                fill = QColor(
+                    min(255, fill.red() + 60),
+                    max(0, fill.green() - 40),
+                    max(0, fill.blue() - 40),
+                    fill.alpha(),
+                )
+
+            # Apply orange tint when supply is critically low at a significant base.
+            if port >= 2 and supply < 1000:
+                stroke = QColor(
+                    min(255, stroke.red() + 40),
+                    min(255, stroke.green() + 20),
+                    max(0, stroke.blue() - 80),
+                    stroke.alpha(),
+                )
+
+            radius = max(0.6, 0.35 + 0.12 * base_level)
+            self._draw_hex_radius_circle(
+                layer_key,
+                pos,
+                radius_hexes=radius,
+                stroke=stroke,
+                fill=fill,
+                width=1.2,
+                z_value=31.0,
+            )
+            drawn += 1
+
+        logger.info(
+            "Base status overlay: side=%s total_records=%d drawn=%d",
+            self._side,
+            len(base_records),
+            drawn,
+        )
 
     def _row_offset(self, row_zero: int) -> float:
         if self.SHIFT_EVEN_ROWS_RIGHT:
@@ -1527,6 +1826,7 @@ class MainWindow(QMainWindow):
 
         lines.extend(["", "Overlay marker counts:"])
         for layer_key in ["cv_tfs", "other_tfs", "submarine_patrols", "submarine_threats", "invasions", "threats", "combat"]:
+        for layer_key in ["submarine_patrols", "submarine_threats", "invasions", "threats", "combat", "logistics_taskforces", "logistics_bases"]:
             marker_count = len(self._overlay_items.get(layer_key, []))
             is_visible = "ON" if marker_count > 0 else "OFF"
             lines.append(f"- {layer_key}: {is_visible} (markers: {marker_count})")
