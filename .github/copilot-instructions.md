@@ -57,6 +57,18 @@ interop requires a 32-bit process.
 - If startup smoke check cannot be run in the current environment, explicitly
   report that limitation and do not claim full completion.
 
+## Changelog maintenance
+
+- Maintain `CHANGELOG.md` for all user-visible behavior changes, bug fixes,
+  and feature additions.
+- When implementation work is complete, add a concise changelog entry in
+  Keep a Changelog style sections (`Added`, `Changed`, `Fixed`) under an
+  `Unreleased` heading or the active release heading used by the repo.
+- Do not mark work complete if code changed but `CHANGELOG.md` was not updated
+  (unless the user explicitly asks to skip changelog updates).
+- Changelog entries should be outcome-focused (what changed for users) and
+  avoid internal-only implementation detail unless it affects behavior.
+
 ## Migration guidance
 
 - Do not reintroduce .NET, WPF, solution files, or C# build scripts.
