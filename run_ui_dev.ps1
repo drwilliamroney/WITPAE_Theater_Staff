@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
-    Launch WITPAE Theater Staff (PyQt5) with Python x86 3.13+ checks.
-    Always runs from the 'main' branch.
-    For the development/copilot branch use run_ui_dev.ps1 instead.
+    Launch WITPAE Theater Staff (PyQt5) — Development Build.
+    Always runs from the 'copilot/dev' branch.
+    For the stable/main branch use run_ui.ps1 instead.
 #>
 
 Set-StrictMode -Version Latest
@@ -21,21 +21,21 @@ function Invoke-GitUpdate {
         return
     }
 
-    Write-Host '[INFO] Switching to main branch and fetching latest changes...'
+    Write-Host '[INFO] Switching to copilot/dev branch and fetching latest changes...'
     try {
-        git fetch origin main 2>$null
+        git fetch origin copilot/dev 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Host '[WARN] git fetch failed — continuing with existing local code.'
             return
         }
-        git checkout main 2>$null
+        git checkout copilot/dev 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host '[WARN] git checkout main failed — continuing with existing local code.'
+            Write-Host '[WARN] git checkout copilot/dev failed — continuing with existing local code.'
             return
         }
-        git pull --ff-only origin main
+        git pull --ff-only origin copilot/dev
         if ($LASTEXITCODE -ne 0) {
-            Write-Host '[WARN] git pull --ff-only origin main failed — continuing with existing local code.'
+            Write-Host '[WARN] git pull --ff-only origin copilot/dev failed — continuing with existing local code.'
             Write-Host '[WARN] (This may be due to local uncommitted changes or a non-linear history.)'
         }
     }
@@ -180,7 +180,7 @@ try {
     Show-PythonInfo -PythonExe $pythonExe
     $venvPython = Ensure-Venv -PythonExe $pythonExe
 
-    Write-Host "[INFO] Starting WITPAE Theater Staff ..."
+    Write-Host "[INFO] Starting WITPAE Theater Staff (copilot/dev) ..."
     Write-Host "       Side      : $side"
     Write-Host "       Game dir  : $gamePath"
     Write-Host "       Save dir  : $savePath"
