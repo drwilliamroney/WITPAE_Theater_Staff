@@ -383,6 +383,7 @@ def _extract_hqs_from_snapshots(scraper: Any) -> list[dict[str, Any]]:
                 "x": hx,
                 "y": hy,
                 "hq_kind": hq_kind,
+                "radius": int(loc.get("radius", 0)),
             }
         )
 

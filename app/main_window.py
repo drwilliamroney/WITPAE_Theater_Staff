@@ -205,11 +205,11 @@ class MainWindow(QMainWindow):
         ],
         "Ground": [
             ("transport_tfs", "Transport TF"),
+            ("ground_hq", "Ground HQ"),
         ],
         "Logistics": [
             ("logistics_taskforces", "Task Forces"),
             ("logistics_bases", "Bases"),
-            ("ground_hq", "Ground HQ"),
         ],
     }
 
@@ -1615,9 +1615,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Draw map markers for HQ locations whose hq_kind is in the given set.
 
-        Each HQ is represented by a filled circle sized to one hex-width plus a
-        small text label showing the HQ name, placed directly on the scene so it
-        moves and scales with the map.
+        Each HQ is represented by a filled circle whose radius reflects the
+        HQ's command radius from the game data (PWSLocation.radius, in hexes).
+        A minimum display radius of 0.55 hexes is used when the stored radius
+        is zero.  A small text label shows the HQ name.
         """
         self._overlay_items[layer_key].clear()
 
@@ -1637,10 +1638,13 @@ class MainWindow(QMainWindow):
             if x < 1 or y < 1 or x > GAME_COLS or y > GAME_ROWS:
                 continue
 
+            raw_radius = self._safe_int(record.get("radius"), 0)
+            radius_hexes = float(raw_radius) if raw_radius > 0 else 0.55
+
             self._draw_hex_radius_circle(
                 layer_key,
                 (x, y),
-                radius_hexes=0.55,
+                radius_hexes=radius_hexes,
                 stroke=stroke,
                 fill=fill,
                 width=1.8,
@@ -1687,7 +1691,7 @@ class MainWindow(QMainWindow):
         )
 
     def _build_ground_hq_overlay(self) -> None:
-        """Build Ground HQ overlay (theater, army, corp HQ kinds) under the Logistics section."""
+        """Build Ground HQ overlay (theater, army, corp HQ kinds) under the Ground section."""
         self._build_hq_overlay(
             "ground_hq",
             self.GROUND_HQ_KINDS,
@@ -1996,6 +2000,23 @@ class MainWindow(QMainWindow):
             marker_count = len(self._overlay_items.get(layer_key, []))
             is_visible = "ON" if marker_count > 0 else "OFF"
             lines.append(f"- {layer_key}: {is_visible} (markers: {marker_count})")
+
+        hq_records = self._get_scraper_records("hqs")
+        air_hq_count = 0
+        naval_hq_count = 0
+        ground_hq_count = 0
+        for r in hq_records:
+            kind = str(r.get("hq_kind", "")).strip().lower()
+            if kind in self.AIR_HQ_KINDS:
+                air_hq_count += 1
+            elif kind in self.NAVAL_HQ_KINDS:
+                naval_hq_count += 1
+            elif kind in self.GROUND_HQ_KINDS:
+                ground_hq_count += 1
+        lines.extend(["", "HQ counts:"])
+        lines.append(f"- Air HQ: {air_hq_count}")
+        lines.append(f"- Naval HQ: {naval_hq_count}")
+        lines.append(f"- Ground HQ: {ground_hq_count}")
 
         self._detail_panel.setPlainText("\n".join(lines))
 
