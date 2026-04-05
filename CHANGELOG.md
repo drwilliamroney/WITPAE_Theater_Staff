@@ -7,6 +7,10 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added solid filled circle markers at the end-of-day hex for CV TFs, Other TF, and Transport TF overlays, using each TF's line/stroke color. The circle fills the hex so the current TF location is immediately identifiable on the map.
+- Added `_extract_ground_units_from_snapshots()` to `runtime_scraper.py` for in-memory extraction of non-HQ ground unit locations (name, position) from the end-of-day snapshot.
+- Added in-memory `ground_units` dataset to `scrape_snapshot()` output for hex-detail consumption.
+- Added **Selected Hex detail section** at the bottom of the detail display pane: clicking a hex now populates a "Hex (x,y) details" block listing the base name/port/airfield/supply at that hex, any task forces at that hex (TF #, flagship, mission type), and ground units present (listed individually when no base, counted when a base is present).
 - Added air, naval, and ground HQ counts to the details pane so users can see how many HQs of each type are present in the loaded snapshot.
 - Added **Ground HQ** toggle to the Ground section of the overlays dock (moved from Logistics).
 - Added **Naval HQ** overlay under the Surface section of the overlays dock, showing circle markers for naval and amphibious HQ locations (hq_kind: naval, amphib) with text name labels.
