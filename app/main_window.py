@@ -1623,7 +1623,7 @@ class MainWindow(QMainWindow):
 
         hq_records = self._get_scraper_records("hqs")
         if not hq_records:
-            logger.info("HQ overlay %r: no hqs snapshot loaded for side=%s", layer_key, self._side)
+            logger.info("HQ overlay %r: no HQ records available for side=%s", layer_key, self._side)
 
         drawn = 0
         font = QFont("Segoe UI", 7)

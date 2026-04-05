@@ -316,7 +316,12 @@ def _extract_hqs_from_snapshots(scraper: Any) -> list[dict[str, Any]]:
     if not callable(load_snapshot):
         return []
 
-    end_snapshot = load_snapshot(getattr(scraper, "end_of_day_file"), mode=0)
+    try:
+        end_snapshot = load_snapshot(getattr(scraper, "end_of_day_file"), mode=0)
+    except Exception as exc:
+        logger.warning("_extract_hqs_from_snapshots: failed to load snapshot: %s", exc)
+        return []
+
     end_gameday = end_snapshot.get("gameday")
     locations = end_snapshot.get("locations", [])
 
@@ -358,7 +363,15 @@ def _extract_hqs_from_snapshots(scraper: Any) -> list[dict[str, Any]]:
         if not (map_x_min <= hx <= map_x_max and map_y_min <= hy <= map_y_max):
             continue
 
-        hq_kind = decode_hq_kind(int(loc.get("HQtype", 0)))
+        try:
+            hq_kind = decode_hq_kind(int(loc.get("HQtype", 0)))
+        except Exception as exc:
+            logger.debug(
+                "_extract_hqs_from_snapshots: failed to decode HQtype for loc id=%s: %s",
+                loc.get("id"),
+                exc,
+            )
+            continue
         if hq_kind is None:
             continue
 
