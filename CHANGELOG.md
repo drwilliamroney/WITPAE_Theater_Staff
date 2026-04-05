@@ -7,8 +7,14 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added **Naval HQ** overlay under the Surface section of the overlays dock, showing circle markers for naval and amphibious HQ locations (hq_kind: naval, amphib) with text name labels.
+- Added **Air HQ** overlay under the Air section of the overlays dock, showing circle markers for air command HQ locations (hq_kind: air) with text name labels.
+- Added **Ground HQ** overlay under the Logistics section of the overlays dock, showing circle markers for theater, army, and corps HQ locations (hq_kind: theater, army, corp) with text name labels.
+- Added `_extract_hqs_from_snapshots()` to `runtime_scraper.py` for in-memory HQ data extraction from the end-of-day snapshot without writing JSON files.
+- Added in-memory `hqs` dataset to `scrape_snapshot()` output for HQ overlay consumption.
 - Added **Transport TF** overlay under the Ground section of the overlays dock, showing movement lines for TRANSPORT, FASTTRANSPORT, and AMPHIB mission task forces.
-- `run_ui.bat` and `run_ui.ps1` now perform a `git pull` at startup to fetch the latest code before launching; if git is unavailable or the pull fails the scripts warn and continue with the existing local code.
+- Added `run_ui_dev.bat` and `run_ui_dev.ps1` launcher scripts for the `copilot/dev` development branch; these automatically checkout and pull `copilot/dev` before launching.
+- `run_ui.bat` and `run_ui.ps1` now explicitly checkout and pull the `main` branch at startup.
 
 ### Changed
 - Removed TRANSPORT, FASTTRANSPORT, and AMPHIB missions from the **Other TF** overlay (Surface section); they now appear exclusively in the new **Transport TF** overlay under Ground.

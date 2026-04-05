@@ -194,18 +194,22 @@ class MainWindow(QMainWindow):
         "Surface": [
             ("cv_tfs", "CV TFs"),
             ("other_tfs", "Other TF"),
+            ("naval_hq", "Naval HQ"),
         ],
         "Submarine": [
             ("submarine_patrols", "Patrols"),
             ("submarine_threats", "Threats"),
         ],
-        "Air": [],
+        "Air": [
+            ("air_hq", "Air HQ"),
+        ],
         "Ground": [
             ("transport_tfs", "Transport TF"),
         ],
         "Logistics": [
             ("logistics_taskforces", "Task Forces"),
             ("logistics_bases", "Bases"),
+            ("ground_hq", "Ground HQ"),
         ],
     }
 
@@ -219,6 +223,11 @@ class MainWindow(QMainWindow):
 
     # Missions included in the Transport TF overlay (moved out of Other TF, listed under Ground).
     TRANSPORT_TF_MISSIONS: frozenset[str] = frozenset({"TRANSPORT", "FASTTRANSPORT", "AMPHIB"})
+
+    # HQ kind sets for each HQ overlay category (decoded from PWSLocation.HQtype).
+    NAVAL_HQ_KINDS: frozenset[str] = frozenset({"naval", "amphib"})
+    AIR_HQ_KINDS: frozenset[str] = frozenset({"air"})
+    GROUND_HQ_KINDS: frozenset[str] = frozenset({"theater", "army", "corp"})
 
     # Color (R, G, B) per mission type for task force line rendering.
     TF_MISSION_COLORS: dict[str, tuple[int, int, int]] = {
@@ -322,11 +331,14 @@ class MainWindow(QMainWindow):
             "combat": False,
             "cv_tfs": False,
             "other_tfs": False,
+            "naval_hq": False,
             "transport_tfs": False,
             "submarine_patrols": False,
             "submarine_threats": False,
+            "air_hq": False,
             "logistics_taskforces": False,
             "logistics_bases": False,
+            "ground_hq": False,
         }
         self._map_view: MapView | None = None
         self._detail_panel: QTextEdit | None = None
@@ -351,11 +363,14 @@ class MainWindow(QMainWindow):
             "combat": [],
             "cv_tfs": [],
             "other_tfs": [],
+            "naval_hq": [],
             "transport_tfs": [],
             "submarine_patrols": [],
             "submarine_threats": [],
+            "air_hq": [],
             "logistics_taskforces": [],
             "logistics_bases": [],
+            "ground_hq": [],
         }
 
         self._turn_progress_dialog: QProgressDialog | None = None
@@ -583,9 +598,12 @@ class MainWindow(QMainWindow):
         self._build_combat_overlay()
         self._build_cv_tfs_overlay()
         self._build_other_tfs_overlay()
+        self._build_naval_hq_overlay()
         self._build_transport_tfs_overlay()
         self._build_logistics_taskforces_overlay()
         self._build_base_status_overlay()
+        self._build_air_hq_overlay()
+        self._build_ground_hq_overlay()
         self._set_regions_visible(self._regions_visible)
         self._set_hex_grid_visible(self._hex_grid_visible)
         for layer_key in self._overlay_items:
@@ -1586,6 +1604,95 @@ class MainWindow(QMainWindow):
             self._side,
             len(base_records),
             drawn,
+        )
+
+    def _build_hq_overlay(
+        self,
+        layer_key: str,
+        hq_kinds: frozenset[str],
+        stroke: QColor,
+        fill: QColor,
+    ) -> None:
+        """Draw map markers for HQ locations whose hq_kind is in the given set.
+
+        Each HQ is represented by a filled circle sized to one hex-width plus a
+        small text label showing the HQ name, placed directly on the scene so it
+        moves and scales with the map.
+        """
+        self._overlay_items[layer_key].clear()
+
+        hq_records = self._get_scraper_records("hqs")
+        if not hq_records:
+            logger.info("HQ overlay %r: no HQ records available for side=%s", layer_key, self._side)
+
+        drawn = 0
+        font = QFont("Segoe UI", 7)
+        for record in hq_records:
+            kind = str(record.get("hq_kind", "")).strip().lower()
+            if kind not in hq_kinds:
+                continue
+
+            x = self._safe_int(record.get("x"), 0)
+            y = self._safe_int(record.get("y"), 0)
+            if x < 1 or y < 1 or x > GAME_COLS or y > GAME_ROWS:
+                continue
+
+            self._draw_hex_radius_circle(
+                layer_key,
+                (x, y),
+                radius_hexes=0.55,
+                stroke=stroke,
+                fill=fill,
+                width=1.8,
+                z_value=36.0,
+            )
+
+            name = str(record.get("name") or "HQ")
+            center = self._hex_center_for_game_hex(x, y)
+            if center is not None:
+                label = QGraphicsSimpleTextItem(name)
+                label.setFont(font)
+                label.setBrush(QBrush(stroke))
+                label.setPos(center.x() + self._hex_width * 0.6, center.y() - 6.0)
+                label.setZValue(37.0)
+                self._scene.addItem(label)
+                self._overlay_items[layer_key].append(label)
+
+            drawn += 1
+
+        logger.info(
+            "HQ overlay %r: side=%s total_records=%d drawn=%d",
+            layer_key,
+            self._side,
+            len(hq_records),
+            drawn,
+        )
+
+    def _build_naval_hq_overlay(self) -> None:
+        """Build Naval HQ overlay (naval and amphib HQ kinds) under the Surface section."""
+        self._build_hq_overlay(
+            "naval_hq",
+            self.NAVAL_HQ_KINDS,
+            stroke=QColor(80, 140, 255, 230),
+            fill=QColor(80, 140, 255, 55),
+        )
+
+    def _build_air_hq_overlay(self) -> None:
+        """Build Air HQ overlay (air HQ kind) under the Air section."""
+        self._build_hq_overlay(
+            "air_hq",
+            self.AIR_HQ_KINDS,
+            stroke=QColor(0, 220, 240, 230),
+            fill=QColor(0, 220, 240, 50),
+        )
+
+    def _build_ground_hq_overlay(self) -> None:
+        """Build Ground HQ overlay (theater, army, corp HQ kinds) under the Logistics section."""
+        self._build_hq_overlay(
+            "ground_hq",
+            self.GROUND_HQ_KINDS,
+            stroke=QColor(140, 195, 80, 230),
+            fill=QColor(140, 195, 80, 50),
         )
 
     def _row_offset(self, row_zero: int) -> float:

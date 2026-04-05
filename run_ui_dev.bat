@@ -4,13 +4,13 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 
 rem ================================================================
-rem run_ui.bat — WITPAE Theater Staff (PyQt5)
+rem run_ui_dev.bat — WITPAE Theater Staff (PyQt5) — Development Build
 rem
-rem Always runs from the 'main' branch.
-rem For the development/copilot branch use run_ui_dev.bat instead.
+rem Always runs from the 'copilot/dev' branch.
+rem For the stable/main branch use run_ui.bat instead.
 rem
 rem Launch flow:
-rem   0) Git checkout main + pull to fetch latest code and update .venv
+rem   0) Git checkout copilot/dev + pull to fetch latest dev code
 rem   1) Find Python 3.13 x86 interpreter
 rem   2) Validate game DLL presence
 rem   3) Create/update .venv and install dependencies
@@ -38,20 +38,20 @@ if errorlevel 1 (
     echo [WARN] Not inside a git repository — skipping repository update.
     exit /b 0
 )
-echo [INFO] Switching to main branch and fetching latest changes...
-git fetch origin main
+echo [INFO] Switching to copilot/dev branch and fetching latest changes...
+git fetch origin copilot/dev
 if errorlevel 1 (
     echo [WARN] git fetch failed — continuing with existing local code.
     exit /b 0
 )
-git checkout main
+git checkout copilot/dev
 if errorlevel 1 (
-    echo [WARN] git checkout main failed — continuing with existing local code.
+    echo [WARN] git checkout copilot/dev failed — continuing with existing local code.
     exit /b 0
 )
-git pull --ff-only origin main
+git pull --ff-only origin copilot/dev
 if errorlevel 1 (
-    echo [WARN] git pull --ff-only origin main failed — continuing with existing local code.
+    echo [WARN] git pull --ff-only origin copilot/dev failed — continuing with existing local code.
     echo [WARN] (This may be due to local uncommitted changes or a non-linear history.)
 )
 exit /b 0
@@ -169,7 +169,7 @@ exit /b 0
 
 :main
 
-rem -- 0. Git pull to fetch latest code and refresh .venv --------------------
+rem -- 0. Git fetch + checkout copilot/dev + pull ---------------------------
 call :git_update
 
 rem -- 1. Find Python --------------------------------------------------------
@@ -214,7 +214,7 @@ if errorlevel 1 (
 
 rem -- 4. Launch the application --------------------------------------------
 echo.
-echo [INFO] Starting WITPAE Theater Staff ...
+echo [INFO] Starting WITPAE Theater Staff (copilot/dev) ...
 echo        Side      : !RUN_SIDE!
 echo        Game dir  : !GAME_PATH!
 echo        Save dir  : !SAVE_PATH!
