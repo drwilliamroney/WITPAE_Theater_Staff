@@ -7,9 +7,11 @@ The format is based on Keep a Changelog.
 ## [Unreleased]
 
 ### Added
+- Added air, naval, and ground HQ counts to the details pane so users can see how many HQs of each type are present in the loaded snapshot.
+- Added **Ground HQ** toggle to the Ground section of the overlays dock (moved from Logistics).
 - Added **Naval HQ** overlay under the Surface section of the overlays dock, showing circle markers for naval and amphibious HQ locations (hq_kind: naval, amphib) with text name labels.
 - Added **Air HQ** overlay under the Air section of the overlays dock, showing circle markers for air command HQ locations (hq_kind: air) with text name labels.
-- Added **Ground HQ** overlay under the Logistics section of the overlays dock, showing circle markers for theater, army, and corps HQ locations (hq_kind: theater, army, corp) with text name labels.
+- Added **Ground HQ** overlay under the Ground section of the overlays dock, showing circle markers for theater, army, and corps HQ locations (hq_kind: theater, army, corp) with text name labels.
 - Added `_extract_hqs_from_snapshots()` to `runtime_scraper.py` for in-memory HQ data extraction from the end-of-day snapshot without writing JSON files.
 - Added in-memory `hqs` dataset to `scrape_snapshot()` output for HQ overlay consumption.
 - Added **Transport TF** overlay under the Ground section of the overlays dock, showing movement lines for TRANSPORT, FASTTRANSPORT, and AMPHIB mission task forces.
@@ -17,6 +19,8 @@ The format is based on Keep a Changelog.
 - `run_ui.bat` and `run_ui.ps1` now explicitly checkout and pull the `main` branch at startup.
 
 ### Changed
+- Moved Ground HQ overlay toggle from Logistics section to Ground section in the overlays dock.
+- HQ marker circle radius now uses the actual command radius stored in `PWSLocation.radius` (from the game data), falling back to a minimum display radius of 0.55 hexes when the stored radius is zero. Previously all HQ circles were drawn at a fixed 0.55-hex radius regardless of the unit data.
 - Removed TRANSPORT, FASTTRANSPORT, and AMPHIB missions from the **Other TF** overlay (Surface section); they now appear exclusively in the new **Transport TF** overlay under Ground.
 
 ### Fixed

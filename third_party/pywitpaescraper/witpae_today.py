@@ -1003,6 +1003,7 @@ class WITPAE_Today:
                         "toe": int(loc.TOE),
                         "attachedHQ": int(loc.attachedHQ),
                         "HQtype": int(loc.HQtype),
+                        "radius": int(loc.radius),
                         "leaderID": int(loc.leaderID),
                         "port": int(loc.port),
                         "airfield": int(loc.airfield),
