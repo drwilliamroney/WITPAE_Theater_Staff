@@ -161,11 +161,13 @@ class MapView(QGraphicsView):
         if isinstance(self._main_window, MainWindow):
             self._main_window.on_map_hover(scene_pos)
             if self._main_window._show_mouse_pixel_debug:
-                QToolTip.showText(
-                    event.globalPos(),
-                    f"px ({scene_pos.x():.1f}, {scene_pos.y():.1f})",
-                    self.viewport(),
-                )
+                hex_xy = self._main_window._hover_hex
+                if hex_xy is not None:
+                    QToolTip.showText(
+                        event.globalPos(),
+                        f"hex ({hex_xy[0]}, {hex_xy[1]})",
+                        self.viewport(),
+                    )
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
