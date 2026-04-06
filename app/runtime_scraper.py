@@ -390,6 +390,71 @@ def _extract_hqs_from_snapshots(scraper: Any) -> list[dict[str, Any]]:
     return hq_records
 
 
+def _extract_ground_units_from_snapshots(scraper: Any) -> list[dict[str, Any]]:
+    """Extract non-HQ ground unit locations from the end-of-day snapshot.
+
+    Returns one record per ground unit with its name, position, and unit type.
+    HQ locations (type == 4) are excluded here as they are covered by the HQ overlay.
+    """
+    load_snapshot = getattr(scraper, "_load_snapshot", None)
+    if not callable(load_snapshot):
+        return []
+
+    try:
+        end_snapshot = load_snapshot(getattr(scraper, "end_of_day_file"), mode=0)
+    except Exception as exc:
+        logger.warning("_extract_ground_units_from_snapshots: failed to load snapshot: %s", exc)
+        return []
+
+    end_gameday = end_snapshot.get("gameday")
+    locations = end_snapshot.get("locations", [])
+
+    nation_allowed = getattr(scraper, "_nation_allowed", None)
+    arrived_by_gameday = getattr(scraper, "_arrived_by_gameday", None)
+    enum_name = getattr(scraper, "_enum_name", None)
+
+    if not callable(nation_allowed) or not callable(arrived_by_gameday) or not callable(enum_name):
+        logger.warning("_extract_ground_units_from_snapshots: required scraper methods are unavailable.")
+        return []
+
+    pwsdll_module = importlib.import_module("pwsdll")
+    nationality = getattr(pwsdll_module, "Nationality")
+
+    HQ_TYPE = 4
+    map_x_min, map_x_max = 1, 232
+    map_y_min, map_y_max = 1, 205
+
+    ground_unit_records: list[dict[str, Any]] = []
+    for loc in locations:
+        if str(loc.get("role", "")) != "ground_unit":
+            continue
+        if int(loc.get("type", -1)) == HQ_TYPE:
+            continue
+        nation_code = int(loc.get("nation", 0))
+        if not nation_allowed(nation_code):
+            continue
+        if not arrived_by_gameday(int(loc.get("arrive", 0)), end_gameday):
+            continue
+
+        gx = int(loc.get("x", 0))
+        gy = int(loc.get("y", 0))
+        if not (map_x_min <= gx <= map_x_max and map_y_min <= gy <= map_y_max):
+            continue
+
+        ground_unit_records.append(
+            {
+                "record_id": int(loc.get("id", 0)),
+                "name": loc.get("name") or None,
+                "nation": enum_name(nation_code, nationality),
+                "x": gx,
+                "y": gy,
+                "unit_type": int(loc.get("type", 0)),
+            }
+        )
+
+    return ground_unit_records
+
+
 def _extract_turn(scraper: Any) -> dict[str, Any]:
     scenario_name = getattr(scraper, "scenario_name", None) or getattr(scraper, "scenario", None)
     game_date = getattr(scraper, "game_date", None)
@@ -457,12 +522,14 @@ def scrape_snapshot(game_dir: Path, save_path: Path, side: str) -> tuple[dict[st
         bases = _extract_bases_from_snapshots(scraper)
     threats = _extract_threats(scraper)
     hqs = _extract_hqs_from_snapshots(scraper)
+    ground_units = _extract_ground_units_from_snapshots(scraper)
 
     records = {
         "taskforces": taskforces,
         "invasions": threats.get("invasion_threat_areas", []),
         "bases": bases,
         "hqs": hqs,
+        "ground_units": ground_units,
     }
     objects = {
         "threats": threats,
@@ -470,10 +537,11 @@ def scrape_snapshot(game_dir: Path, save_path: Path, side: str) -> tuple[dict[st
     }
 
     logger.info(
-        "Scrape snapshot complete: taskforces=%s bases=%s hqs=%s threats=%s sub_threats=%s invasions=%s",
+        "Scrape snapshot complete: taskforces=%s bases=%s hqs=%s ground_units=%s threats=%s sub_threats=%s invasions=%s",
         len(records.get("taskforces", [])),
         len(records.get("bases", [])),
         len(records.get("hqs", [])),
+        len(records.get("ground_units", [])),
         len(threats.get("threat_areas", [])),
         len(threats.get("sub_threat_areas", [])),
         len(threats.get("invasion_threat_areas", [])),

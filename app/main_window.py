@@ -161,11 +161,13 @@ class MapView(QGraphicsView):
         if isinstance(self._main_window, MainWindow):
             self._main_window.on_map_hover(scene_pos)
             if self._main_window._show_mouse_pixel_debug:
-                QToolTip.showText(
-                    event.globalPos(),
-                    f"px ({scene_pos.x():.1f}, {scene_pos.y():.1f})",
-                    self.viewport(),
-                )
+                hex_xy = self._main_window._hover_hex
+                if hex_xy is not None:
+                    QToolTip.showText(
+                        event.globalPos(),
+                        f"hex ({hex_xy[0]}, {hex_xy[1]})",
+                        self.viewport(),
+                    )
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802
@@ -1203,6 +1205,31 @@ class MainWindow(QMainWindow):
                 self._scene.addItem(target_item)
                 self._overlay_items[layer_key].append(target_item)
 
+    def _draw_tf_location_dot(
+        self,
+        layer_key: str,
+        end_xy: tuple[int, int],
+        color: QColor,
+    ) -> None:
+        """Draw a solid filled circle at the TF's current (end-of-day) hex position."""
+        center = self._hex_center_for_game_hex(end_xy[0], end_xy[1])
+        if center is None:
+            return
+        dot_r = max(4.0, self._hex_size_x * 0.85)
+        fill_color = QColor(color.red(), color.green(), color.blue(), 200)
+        border_color = QColor(color.red(), color.green(), color.blue(), 255)
+        dot_item = QGraphicsEllipseItem(
+            center.x() - dot_r,
+            center.y() - dot_r,
+            dot_r * 2.0,
+            dot_r * 2.0,
+        )
+        dot_item.setPen(QPen(border_color, 1.5))
+        dot_item.setBrush(QBrush(fill_color))
+        dot_item.setZValue(37.5)
+        self._scene.addItem(dot_item)
+        self._overlay_items[layer_key].append(dot_item)
+
     def _build_cv_tfs_overlay(self) -> None:
         """Build overlay lines for CV (air-combat) task forces."""
         layer_key = "cv_tfs"
@@ -1234,6 +1261,7 @@ class MainWindow(QMainWindow):
                 target_xy,
                 color=color,
             )
+            self._draw_tf_location_dot(layer_key, (end_x, end_y), color)
             drawn += 1
 
         if drawn > 0:
@@ -1355,6 +1383,7 @@ class MainWindow(QMainWindow):
                 target_xy,
                 color=color,
             )
+            self._draw_tf_location_dot(layer_key, (end_x, end_y), color)
 
         for mission, color in sorted(mission_colors.items()):
             if mission in self.TF_MISSION_DISPLAY_NAMES:
@@ -1408,6 +1437,7 @@ class MainWindow(QMainWindow):
                 target_xy,
                 color=color,
             )
+            self._draw_tf_location_dot(layer_key, (end_x, end_y), color)
 
         for mission, color in sorted(mission_colors.items()):
             if mission in self.TF_MISSION_DISPLAY_NAMES:
@@ -2018,7 +2048,66 @@ class MainWindow(QMainWindow):
         lines.append(f"- Naval HQ: {naval_hq_count}")
         lines.append(f"- Ground HQ: {ground_hq_count}")
 
+        if self._selected_hex is not None:
+            lines.extend(["", "─" * 30])
+            lines.extend(self._hex_detail_lines(self._selected_hex))
+
         self._detail_panel.setPlainText("\n".join(lines))
+
+    def _hex_detail_lines(self, hex_xy: tuple[int, int]) -> list[str]:
+        """Return detail lines describing what is at the given game hex."""
+        hx, hy = hex_xy
+        lines: list[str] = [f"Hex ({hx},{hy}) details:"]
+
+        # --- Bases at this hex ---
+        base_records = self._get_scraper_records("bases")
+        bases_here = [
+            r for r in base_records
+            if self._safe_int(r.get("x"), 0) == hx and self._safe_int(r.get("y"), 0) == hy
+        ]
+        has_base = bool(bases_here)
+        if has_base:
+            for base in bases_here:
+                name = base.get("name") or "(unnamed base)"
+                port = self._safe_int(base.get("port"), 0)
+                airfield = self._safe_int(base.get("airfield"), 0)
+                supply = self._safe_int(base.get("supply"), 0)
+                lines.append(f"  Base: {name}")
+                lines.append(f"    Port: {port}  Airfield: {airfield}  Supply: {supply}")
+
+        # --- Task forces at this hex (by end-of-day position) ---
+        tf_records = self._get_scraper_records("taskforces")
+        tfs_here = [
+            r for r in tf_records
+            if (
+                self._safe_int(r.get("end_of_day_x"), 0) == hx
+                and self._safe_int(r.get("end_of_day_y"), 0) == hy
+            )
+        ]
+        if tfs_here:
+            lines.append("  Task forces:")
+            for tf in tfs_here:
+                tf_id = tf.get("record_id", "?")
+                flagship = tf.get("flagship_name") or "-"
+                mission = tf.get("mission") or "-"
+                lines.append(f"    TF #{tf_id}  {flagship}  [{mission}]")
+
+        # --- Ground units at this hex (shown when no base, or always) ---
+        ground_records = self._get_scraper_records("ground_units")
+        ground_here = [
+            r for r in ground_records
+            if self._safe_int(r.get("x"), 0) == hx and self._safe_int(r.get("y"), 0) == hy
+        ]
+        if ground_here:
+            lines.append("  Ground units:")
+            for gu in ground_here:
+                name = gu.get("name") or "(unnamed)"
+                lines.append(f"    {name}")
+
+        if not has_base and not tfs_here and not ground_here:
+            lines.append("  (no forces or bases)")
+
+        return lines
 
     def _startup_game(self) -> None:
         command_parts = self._prompt_startup_command()
