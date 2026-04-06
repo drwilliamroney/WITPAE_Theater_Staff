@@ -6,11 +6,11 @@ cd /d "%~dp0"
 rem ================================================================
 rem run_ui_dev.bat — WITPAE Theater Staff (PyQt5) — Development Build
 rem
-rem Always runs from the 'copilot/dev' branch.
+rem Lists available remote branches and asks the user to select one.
 rem For the stable/main branch use run_ui.bat instead.
 rem
 rem Launch flow:
-rem   0) Git checkout copilot/dev + pull to fetch latest dev code
+rem   0) Fetch remote branches, let user pick one, then pull
 rem   1) Find Python 3.13 x86 interpreter
 rem   2) Validate game DLL presence
 rem   3) Create/update .venv and install dependencies
@@ -24,6 +24,7 @@ set "VENV_DIR=%~dp0.venv"
 set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
 set "GAME_DLL_1=pwsdll.dll"
 set "GAME_DLL_2=pwsdll7.dll"
+set "SELECTED_BRANCH=copilot/dev"
 
 goto main
 
@@ -38,20 +39,57 @@ if errorlevel 1 (
     echo [WARN] Not inside a git repository — skipping repository update.
     exit /b 0
 )
-echo [INFO] Switching to copilot/dev branch and fetching latest changes...
-git fetch origin copilot/dev
+
+git fetch --prune origin >nul 2>&1
 if errorlevel 1 (
     echo [WARN] git fetch failed — continuing with existing local code.
     exit /b 0
 )
-git checkout copilot/dev
-if errorlevel 1 (
-    echo [WARN] git checkout copilot/dev failed — continuing with existing local code.
+
+echo.
+echo Available remote branches:
+set /a BRANCH_COUNT=0
+for /f "tokens=1" %%B in ('git branch -r 2^>nul ^| findstr /v "HEAD"') do (
+    set "RAW=%%B"
+    set "BNAME=!RAW:origin/=!"
+    set /a BRANCH_COUNT+=1
+    set "BRANCH_!BRANCH_COUNT!=!BNAME!"
+    echo   !BRANCH_COUNT!. !BNAME!
+)
+
+if !BRANCH_COUNT!==0 (
+    echo [WARN] No remote branches found — continuing with existing local code.
     exit /b 0
 )
-git pull --ff-only origin copilot/dev
+
+echo.
+set "SEL=1"
+set /p "SEL=Select branch # (1-!BRANCH_COUNT!, default 1): "
+if "!SEL!"=="" set "SEL=1"
+
+set /a SEL_NUM=!SEL! 2>nul
+if !SEL_NUM! LSS 1 (
+    echo [WARN] Invalid selection — using #1.
+    set "SEL_NUM=1"
+)
+if !SEL_NUM! GTR !BRANCH_COUNT! (
+    echo [WARN] Invalid selection — using #1.
+    set "SEL_NUM=1"
+)
+
+for /l %%I in (1,1,!BRANCH_COUNT!) do (
+    if %%I==!SEL_NUM! set "SELECTED_BRANCH=!BRANCH_%%I!"
+)
+
+echo [INFO] Switching to branch '!SELECTED_BRANCH!'...
+git checkout !SELECTED_BRANCH! >nul 2>&1
 if errorlevel 1 (
-    echo [WARN] git pull --ff-only origin copilot/dev failed — continuing with existing local code.
+    echo [WARN] git checkout !SELECTED_BRANCH! failed — continuing with existing local code.
+    exit /b 0
+)
+git pull --ff-only origin !SELECTED_BRANCH!
+if errorlevel 1 (
+    echo [WARN] git pull --ff-only origin !SELECTED_BRANCH! failed — continuing with existing local code.
     echo [WARN] (This may be due to local uncommitted changes or a non-linear history.)
 )
 exit /b 0
@@ -169,7 +207,7 @@ exit /b 0
 
 :main
 
-rem -- 0. Git fetch + checkout copilot/dev + pull ---------------------------
+rem -- 0. Fetch remote branches, ask user to pick one, then pull ------------
 call :git_update
 
 rem -- 1. Find Python --------------------------------------------------------
@@ -214,7 +252,7 @@ if errorlevel 1 (
 
 rem -- 4. Launch the application --------------------------------------------
 echo.
-echo [INFO] Starting WITPAE Theater Staff (copilot/dev) ...
+echo [INFO] Starting WITPAE Theater Staff (!SELECTED_BRANCH!) ...
 echo        Side      : !RUN_SIDE!
 echo        Game dir  : !GAME_PATH!
 echo        Save dir  : !SAVE_PATH!

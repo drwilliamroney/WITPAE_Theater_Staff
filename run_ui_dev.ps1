@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Launch WITPAE Theater Staff (PyQt5) — Development Build.
-    Always runs from the 'copilot/dev' branch.
+    Lists available remote branches and asks the user to select one.
     For the stable/main branch use run_ui.ps1 instead.
 #>
 
@@ -12,35 +12,70 @@ Push-Location $PSScriptRoot
 function Invoke-GitUpdate {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Write-Host '[WARN] git not found in PATH — skipping repository update.'
-        return
+        return 'copilot/dev'
     }
 
     git rev-parse --is-inside-work-tree 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
         Write-Host '[WARN] Not inside a git repository — skipping repository update.'
-        return
+        return 'copilot/dev'
     }
 
-    Write-Host '[INFO] Switching to copilot/dev branch and fetching latest changes...'
     try {
-        git fetch origin copilot/dev 2>$null
+        git fetch --prune origin 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host '[WARN] git fetch failed — continuing with existing local code.'
-            return
+            return 'copilot/dev'
         }
-        git checkout copilot/dev 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host '[WARN] git checkout copilot/dev failed — continuing with existing local code.'
-            return
+
+        $rawBranches = git branch -r 2>$null
+        $branches = @(
+            $rawBranches |
+                Where-Object { $_ -notmatch 'HEAD' } |
+                ForEach-Object { $_.Trim() -replace '^origin/', '' }
+        )
+
+        if ($branches.Count -eq 0) {
+            Write-Host '[WARN] No remote branches found — continuing with existing local code.'
+            return 'copilot/dev'
         }
-        git pull --ff-only origin copilot/dev
+
+        Write-Host ''
+        Write-Host 'Available remote branches:'
+        for ($i = 0; $i -lt $branches.Count; $i++) {
+            Write-Host "  $($i + 1). $($branches[$i])"
+        }
+        Write-Host ''
+
+        $sel = Read-Host "Select branch # (1-$($branches.Count), default 1)"
+        if ([string]::IsNullOrWhiteSpace($sel)) { $sel = '1' }
+
+        $selNum = 0
+        if (-not [int]::TryParse($sel, [ref]$selNum) -or $selNum -lt 1 -or $selNum -gt $branches.Count) {
+            Write-Host '[WARN] Invalid selection — using #1.'
+            $selNum = 1
+        }
+
+        $selectedBranch = $branches[$selNum - 1]
+        Write-Host "[INFO] Switching to branch '$selectedBranch'..."
+
+        git checkout $selectedBranch 2>$null | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Write-Host '[WARN] git pull --ff-only origin copilot/dev failed — continuing with existing local code.'
+            Write-Host "[WARN] git checkout $selectedBranch failed — continuing with existing local code."
+            return $selectedBranch
+        }
+
+        git pull --ff-only origin $selectedBranch 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[WARN] git pull --ff-only origin $selectedBranch failed — continuing with existing local code."
             Write-Host '[WARN] (This may be due to local uncommitted changes or a non-linear history.)'
         }
+
+        return $selectedBranch
     }
     catch {
         Write-Host "[WARN] git update threw an exception — continuing with existing local code. ($_)"
+        return 'copilot/dev'
     }
 }
 
@@ -161,7 +196,7 @@ try {
     $defaultSide = 'allies'
     $defaultGamePath = 'C:\Matrix Games\War in the Pacific Admiral''s Edition'
 
-    Invoke-GitUpdate
+    $selectedBranch = Invoke-GitUpdate
 
     $pythonExe = Resolve-Python
 
@@ -180,7 +215,7 @@ try {
     Show-PythonInfo -PythonExe $pythonExe
     $venvPython = Ensure-Venv -PythonExe $pythonExe
 
-    Write-Host "[INFO] Starting WITPAE Theater Staff (copilot/dev) ..."
+    Write-Host "[INFO] Starting WITPAE Theater Staff ($selectedBranch) ..."
     Write-Host "       Side      : $side"
     Write-Host "       Game dir  : $gamePath"
     Write-Host "       Save dir  : $savePath"
